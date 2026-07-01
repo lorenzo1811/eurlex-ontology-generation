@@ -4,17 +4,16 @@
 # Documentation for this file format can be found in "Parameters"
 # Link: https://docs.kedro.org/en/1.4.0/configuration/parameters.html
 
-# List of columns to keep from the source dataset
-selected_columns:
-  - CELEX
-  - Act_name
-  - Act_type
-  - Subject_matter
-  - Date_document
-  - act_raw_text
+eurlex_ingestion:
 
-# Flag used to filter out rows that don't have text
-drop_missing_text: true
-
-# Specifies which column contains text to analyze
-text_column: act_raw_text
+  # List of columns to keep from the source dataset
+  selected_columns:
+    - CELEX
+    - Act_name
+    - Act_type
+    - Subject_matter
+    - Date_document
+    - act_raw_text
+  
+  drop_missing_text: true     # Flag used to filter out rows that don't have text  
+  text_column: act_raw_text   # Specifies which column contains text to analyze

@@ -10,10 +10,40 @@ eurlex_raw:
   load_args:
     encoding: utf-8
 
-# Dataset corpus prepared for ontology extraction
+# Cleaned corpus prepared from the original dataset
 eurlex_corpus:
   type: pandas.CSVDataset
   filepath: data/02_intermediate/eurlex_corpus.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8
+
+# Sample of the corpus selected for ontology extraction
+eurlex_sample:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/eurlex_sample.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8
+
+# Corpus split into chunks ready for LLM processing
+eurlex_chunks:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/eurlex_chunks.csv
   fs_args:
     open_args_save:
       encoding: utf-8
