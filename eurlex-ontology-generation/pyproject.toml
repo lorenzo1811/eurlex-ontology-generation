@@ -17,6 +17,7 @@ dependencies = [
     "notebook",
     "kedro~=1.4.0",
     "pandas>=2.3.3",
+    "kedro-datasets>=9.5.0",
 ]
 
 [project.scripts]

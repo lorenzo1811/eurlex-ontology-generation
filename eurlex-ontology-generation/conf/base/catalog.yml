@@ -2,3 +2,25 @@
 #
 # Documentation for this file format can be found in "The Data Catalog"
 # Link: https://docs.kedro.org/en/stable/catalog-data/introduction/#data-catalog
+
+# Original EurLex dataset
+eurlex_raw:
+  type: pandas.CSVDataset
+  filepath: data/01_raw/EurLex_all.csv
+  load_args:
+    encoding: utf-8
+
+# Dataset corpus prepared for ontology extraction
+eurlex_corpus:
+  type: pandas.CSVDataset
+  filepath: data/02_intermediate/eurlex_corpus.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8
