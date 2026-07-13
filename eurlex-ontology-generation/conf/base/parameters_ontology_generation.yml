@@ -1,0 +1,75 @@
+# This is a boilerplate parameters config generated for pipeline 'ontology_generation'
+# using Kedro 1.4.0.
+#
+# Documentation for this file format can be found in "Parameters"
+# Link: https://docs.kedro.org/en/1.4.0/configuration/parameters.html
+
+ontology_generation:
+
+  model: qwen2.5:3b   # Name of the LLM model
+  max_chunks: 5       # Number of chunks to process
+  temperature: 0.2    # Controls randomness: lower values (close to 0) make output deterministic
+
+  # Prompt instructions that define the LLM's role, task, and output constraints (remains the same for all chunks)
+  # The '|' preserves multiline formatting
+  system_prompt: |
+    You are an ontology engineering expert.
+
+    Your task is to analyse legal documents from the EurLex corpus.
+
+    Extract:
+    - classes: general concepts or categories in the legal domain
+    - entities: specific named objects mentioned in the text
+    - relationships: semantic relations between entities
+
+    Return only valid JSON.
+
+  # Contains the text of the document, each chunk will produce a different prompt
+  user_prompt_template: |
+    Analyze the following European legal document and extract a structured ontology.
+
+    Extract:
+    1. "classes": Identify general concepts, categories, or types of things mentioned in the text (e.g., types of documents, organizations, roles, products, locations, or actions). Every class must contain:
+      - "name": the class name
+      - "description": a brief definition of the class context within the text
+    2. "entities": Identify the specific, named instances or individual objects that belong to those classes. Every entity must contain:
+      - "name": the entity name
+      - "type": the corresponding class
+    3. "relationships": Identify semantic links connecting the extracted entities. Every relationship must contain:
+      - "source": entity name
+      - "relation": relationship type
+      - "target": entity name
+
+    Rules:
+    - Do not invent information.
+    - Extract only information explicitly present in the text.
+    - Use the exact JSON structure below.
+    - Do not add explanations.
+
+    Return ONLY valid JSON:
+
+    {{
+      "classes": [
+        {{
+          "name": "",
+          "description": ""
+        }}
+      ],
+      "entities": [
+        {{
+          "name": "",
+          "type": ""
+        }}
+      ],
+      "relationships": [
+        {{
+          "source": "",
+          "relation": "",
+          "target": ""
+        }}
+      ]
+    }}
+
+    Legal text:
+
+    {text}

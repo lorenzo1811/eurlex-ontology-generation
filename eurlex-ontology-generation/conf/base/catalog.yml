@@ -54,3 +54,18 @@ eurlex_chunks:
     encoding: utf-8
   load_args:
     encoding: utf-8
+
+# Partial ontology extracted from each corpus chunk
+ontology_candidates:
+  type: pandas.CSVDataset
+  filepath: data/04_feature/ontology_candidates.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8

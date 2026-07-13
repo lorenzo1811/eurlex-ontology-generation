@@ -18,6 +18,7 @@ dependencies = [
     "kedro~=1.4.0",
     "pandas>=2.3.3",
     "kedro-datasets>=9.5.0",
+    "ollama>=0.6.2",
 ]
 
 [project.scripts]
