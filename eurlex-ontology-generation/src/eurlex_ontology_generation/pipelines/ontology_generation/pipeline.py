@@ -15,6 +15,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_generation.temperature",
                     "params:ontology_generation.system_prompt",
                     "params:ontology_generation.user_prompt_template",
+                    "params:ontology_generation.json_mode",
                 ],
                 outputs="ontology_candidates",
                 name="generate_partial_ontologies_node",

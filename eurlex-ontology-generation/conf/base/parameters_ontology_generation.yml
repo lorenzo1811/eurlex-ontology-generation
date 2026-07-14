@@ -6,70 +6,199 @@
 
 ontology_generation:
 
-  model: qwen2.5:3b   # Name of the LLM model
-  max_chunks: 5       # Number of chunks to process
-  temperature: 0.2    # Controls randomness: lower values (close to 0) make output deterministic
+  model: qwen2.5:3b     # Name of the LLM model
+  max_chunks: 5         # Number of chunks to process
+  temperature: 0.2      # Controls randomness: lower values (close to 0) make output deterministic
+  ontology_domain: ODRL # Domain of the ontology
+  json_mode: true
+
 
   # Prompt instructions that define the LLM's role, task, and output constraints (remains the same for all chunks)
   # The '|' preserves multiline formatting
   system_prompt: |
-    You are an ontology engineering expert.
+    You are an expert ontology engineer specialized in legal knowledge representation
+    and the Open Digital Rights Language (ODRL).
 
-    Your task is to analyse legal documents from the EurLex corpus.
+    Your task is to analyze fragments of the EUR-Lex legal corpus and propose
+    a machine-readable ontology aligned with ODRL principles.
 
-    Extract:
-    - classes: general concepts or categories in the legal domain
-    - entities: specific named objects mentioned in the text
-    - relationships: semantic relations between entities
+    The goal is not to summarize the legal document.
+    The goal is to identify reusable concepts, entities, rights, obligations,
+    permissions, constraints and relationships that can represent legal information.
 
-    Return only valid JSON.
+
+    ODRL CORE CONCEPTS:
+
+    Asset:
+    A resource, document, service, product, data object or legal subject
+    to which permissions, prohibitions or obligations apply.
+
+    Party:
+    An individual, organization, institution, authority or legal entity
+    involved in a legal expression.
+
+    RightsHolder:
+    A party controlling or owning rights associated with an asset.
+
+    Permission:
+    An action allowed on an asset.
+
+    Constraint:
+    A restriction limiting a permission.
+    Examples:
+    - time limitation
+    - geographic limitation
+    - quantity limitation
+    - jurisdiction
+    - user category
+    - purpose limitation
+
+    Requirement:
+    An obligation or prerequisite that must be satisfied before exercising a permission.
+
+    Condition:
+    A circumstance that can modify, invalidate or terminate a permission.
+
+    Offer:
+    A proposal describing rights and obligations.
+
+    Agreement:
+    An accepted legal arrangement between parties.
+
+    Context:
+    Metadata describing identifiers, dates, legal references, jurisdictions
+    and relationships.
+
+
+    EUR-LEX DOMAIN EXTENSIONS:
+
+    When necessary extend ODRL with legal concepts such as:
+
+    - LegalInstrument
+    - Regulation
+    - Directive
+    - Decision
+    - Article
+    - LegalProvision
+    - Obligation
+    - Prohibition
+    - Exception
+    - Competence
+    - Jurisdiction
+    - Authority
+    - EnforcementAction
+    - ComplianceRequirement
+    - LegalBasis
+
+
+    IMPORTANT RULES:
+
+    - Distinguish ODRL native concepts from EUR-Lex specific extensions.
+    - Do not invent information not present in the text.
+    - Only create permissions, prohibitions or duties when the legal text explicitly expresses a right, obligation or restriction.
+    - Do not transform every legal action into an ODRL permission.
+    - Prefer reusable ontology concepts instead of document-specific labels.
+    - Represent restrictions as Constraints.
+    - Represent prerequisites as Requirements.
+    - Represent terminating events as Conditions.
+    - Use explicit relationships between concepts.
+    - When uncertain, classify concepts as EUR-Lex extensions.
 
   # Contains the text of the document, each chunk will produce a different prompt
   user_prompt_template: |
-    Analyze the following European legal document and extract a structured ontology.
 
-    Extract:
-    1. "classes": Identify general concepts, categories, or types of things mentioned in the text (e.g., types of documents, organizations, roles, products, locations, or actions). Every class must contain:
-      - "name": the class name
-      - "description": a brief definition of the class context within the text
-    2. "entities": Identify the specific, named instances or individual objects that belong to those classes. Every entity must contain:
-      - "name": the entity name
-      - "type": the corresponding class
-    3. "relationships": Identify semantic links connecting the extracted entities. Every relationship must contain:
-      - "source": entity name
-      - "relation": relationship type
-      - "target": entity name
+    Analyze the following EUR-Lex legal text fragment.
 
-    Rules:
-    - Do not invent information.
-    - Extract only information explicitly present in the text.
-    - Use the exact JSON structure below.
-    - Do not add explanations.
+    Extract a candidate ontology aligned with ODRL.
 
-    Return ONLY valid JSON:
+    Identify:
+
+    1. Main ontology classes.
+    2. Attributes and properties.
+    3. Relationships between concepts.
+    4. Mapping between concepts and ODRL core entities.
+    5. Permissions, obligations, constraints and requirements.
+    6. Legal patterns represented in the text.
+
+
+    Return ONLY valid JSON.
+
+    Use this structure:
 
     {{
+      "ontology_name": "",
+      "description": "",
+
+      "odrl_alignment": {{
+        "core_entities": [],
+        "extensions": []
+      }},
+
       "classes": [
         {{
           "name": "",
-          "description": ""
+          "type": "ODRL_core or Legal_extension",
+          "description": "",
+
+          "properties": [
+            {{
+              "name": "",
+              "datatype": "",
+              "description": ""
+            }}
+          ]
         }}
       ],
-      "entities": [
-        {{
-          "name": "",
-          "type": ""
-        }}
-      ],
+
+
       "relationships": [
         {{
           "source": "",
           "relation": "",
-          "target": ""
+          "target": "",
+          "description": ""
+        }}
+      ],
+
+
+      "rights_model": {{
+
+        "permissions": [
+          {{
+            "action": "",
+            "asset": "",
+            "party": "",
+
+            "constraints": [],
+            "requirements": [],
+            "conditions": []
+          }}
+        ],
+
+        "obligations": []
+      }},
+
+
+      "legal_patterns": [
+        {{
+          "pattern_name": "",
+          "description": "",
+          "entities_involved": []
+        }}
+      ],
+
+
+      "example_instances": [
+        {{
+          "entity": "",
+          "example_value": "",
+          "source_context": ""
         }}
       ]
+
     }}
 
-    Legal text:
+
+    EUR-Lex text:
 
     {text}
