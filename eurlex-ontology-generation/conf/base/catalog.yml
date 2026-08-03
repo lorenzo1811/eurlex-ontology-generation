@@ -69,3 +69,18 @@ ontology_candidates:
     encoding: utf-8
   load_args:
     encoding: utf-8
+
+# Reviews produced by the LLM judge for each ontology candidate
+ontology_reviews:
+  type: pandas.CSVDataset
+  filepath: data/04_feature/ontology_reviews.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8

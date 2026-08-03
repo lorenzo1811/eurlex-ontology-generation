@@ -8,7 +8,7 @@ ontology_generation:
 
   model: qwen2.5:3b     # Name of the LLM model
   max_chunks: 5         # Number of chunks to process
-  temperature: 0.2      # Controls randomness: lower values (close to 0) make output deterministic
+  temperature: 0.1      # Controls randomness: lower values (close to 0) make output deterministic
   ontology_domain: ODRL # Domain of the ontology
   json_mode: true
 
@@ -16,189 +16,90 @@ ontology_generation:
   # Prompt instructions that define the LLM's role, task, and output constraints (remains the same for all chunks)
   # The '|' preserves multiline formatting
   system_prompt: |
-    You are an expert ontology engineer specialized in legal knowledge representation
-    and the Open Digital Rights Language (ODRL).
+    You are an expert ontology engineer specialized in legal knowledge representation and the W3C Open Digital Rights Language (ODRL) 2.2 Ontology.
 
-    Your task is to analyze fragments of the EUR-Lex legal corpus and propose
-    a machine-readable ontology aligned with ODRL principles.
+    Your task is to analyze legal text fragments from EUR-Lex and extract a machine-readable ontology strictly aligned with ODRL principles.
 
-    The goal is not to summarize the legal document.
-    The goal is to identify reusable concepts, entities, rights, obligations,
-    permissions, constraints and relationships that can represent legal information.
+    CORE ODRL ENTITIES:
+    - Asset: The subject, document, product, or legal resource.
+    - Party: An individual, organization, or authority involved (RightsHolder or Assignee).
+    - Permission: An allowed legal action (e.g., odrl:use, apply_levy, import, export).
+    - Prohibition: A explicitly forbidden action.
+    - Duty: A mandatory obligation or requirement that a Party MUST perform.
+    - Constraint: A quantitative or qualitative restriction attached to a Permission or Duty (e.g., spatial, temporal, threshold).
 
-
-    ODRL CORE CONCEPTS:
-
-    Asset:
-    A resource, document, service, product, data object or legal subject
-    to which permissions, prohibitions or obligations apply.
-
-    Party:
-    An individual, organization, institution, authority or legal entity
-    involved in a legal expression.
-
-    RightsHolder:
-    A party controlling or owning rights associated with an asset.
-
-    Permission:
-    An action allowed on an asset.
-
-    Constraint:
-    A restriction limiting a permission.
-    Examples:
-    - time limitation
-    - geographic limitation
-    - quantity limitation
-    - jurisdiction
-    - user category
-    - purpose limitation
-
-    Requirement:
-    An obligation or prerequisite that must be satisfied before exercising a permission.
-
-    Condition:
-    A circumstance that can modify, invalidate or terminate a permission.
-
-    Offer:
-    A proposal describing rights and obligations.
-
-    Agreement:
-    An accepted legal arrangement between parties.
-
-    Context:
-    Metadata describing identifiers, dates, legal references, jurisdictions
-    and relationships.
-
-
-    EUR-LEX DOMAIN EXTENSIONS:
-
-    When necessary extend ODRL with legal concepts such as:
-
-    - LegalInstrument
-    - Regulation
-    - Directive
-    - Decision
-    - Article
-    - LegalProvision
-    - Obligation
-    - Prohibition
-    - Exception
-    - Competence
-    - Jurisdiction
-    - Authority
-    - EnforcementAction
-    - ComplianceRequirement
-    - LegalBasis
-
-
-    IMPORTANT RULES:
-
-    - Distinguish ODRL native concepts from EUR-Lex specific extensions.
-    - Do not invent information not present in the text.
-    - Only create permissions, prohibitions or duties when the legal text explicitly expresses a right, obligation or restriction.
-    - Do not transform every legal action into an ODRL permission.
-    - Prefer reusable ontology concepts instead of document-specific labels.
-    - Represent restrictions as Constraints.
-    - Represent prerequisites as Requirements.
-    - Represent terminating events as Conditions.
-    - Use explicit relationships between concepts.
-    - When uncertain, classify concepts as EUR-Lex extensions.
+    RULES FOR EXTRACTION:
+    1. Extract explicitly stated legal rights (Permissions), bans (Prohibitions), and mandatory duties (Duties).
+    2. Actions in permissions/duties MUST be lowercase snake_case (e.g., "calculate_import_duty", not "Calculate the import duty for cereal").
+    3. If a legal rule has a condition/limit (e.g., "effective until 1985", "valid for cereal products"), represent it strictly as a Constraint.
+    4. Do not invent facts not present in the provided text fragment.
+    5. Rely strictly on context provided in the input text for any example instances.
 
   # Contains the text of the document, each chunk will produce a different prompt
   user_prompt_template: |
+    Analyze the following EUR-Lex legal text fragment and extract an ODRL-aligned ontology.
 
-    Analyze the following EUR-Lex legal text fragment.
-
-    Extract a candidate ontology aligned with ODRL.
-
-    Identify:
-
-    1. Main ontology classes.
-    2. Attributes and properties.
-    3. Relationships between concepts.
-    4. Mapping between concepts and ODRL core entities.
-    5. Permissions, obligations, constraints and requirements.
-    6. Legal patterns represented in the text.
-
-
-    Return ONLY valid JSON.
-
-    Use this structure:
+    Return ONLY a single valid JSON object following EXPLICITLY this structure:
 
     {{
-      "ontology_name": "",
-      "description": "",
-
+      "ontology_name": "Unique Short Name",
+      "description": "Short explanation of this ontology coverage",
       "odrl_alignment": {{
-        "core_entities": [],
-        "extensions": []
+        "core_entities": ["Asset", "Party", "Permission", "Duty", "Constraint"],
+        "extensions": ["LegalInstrument", "Regulation"]
       }},
-
       "classes": [
         {{
-          "name": "",
-          "type": "ODRL_core or Legal_extension",
-          "description": "",
-
-          "properties": [
-            {{
-              "name": "",
-              "datatype": "",
-              "description": ""
-            }}
-          ]
+          "name": "ClassName",
+          "type": "ODRL_core",
+          "description": "Definition of class"
         }}
       ],
-
-
       "relationships": [
         {{
-          "source": "",
-          "relation": "",
-          "target": "",
-          "description": ""
+          "source": "ClassNameA",
+          "relation": "appliesTo",
+          "target": "ClassNameB",
+          "description": "Relationship description"
         }}
       ],
-
-
       "rights_model": {{
-
         "permissions": [
           {{
-            "action": "",
-            "asset": "",
-            "party": "",
-
-            "constraints": [],
-            "requirements": [],
-            "conditions": []
+            "action": "action_name_in_snake_case",
+            "asset": "TargetAsset",
+            "party": "TargetParty",
+            "constraints": [
+              {{
+                "name": "ConstraintType",
+                "value": "ConstraintValue"
+              }}
+            ]
           }}
         ],
-
-        "obligations": []
+        "duties": [
+          {{
+            "action": "mandatory_action_in_snake_case",
+            "party": "ResponsibleParty",
+            "constraints": []
+          }}
+        ]
       }},
-
-
       "legal_patterns": [
         {{
-          "pattern_name": "",
-          "description": "",
-          "entities_involved": []
+          "pattern_name": "PatternName",
+          "description": "Description of the legal interaction",
+          "entities_involved": ["Entity1", "Entity2"]
         }}
       ],
-
-
       "example_instances": [
         {{
-          "entity": "",
-          "example_value": "",
-          "source_context": ""
+          "entity": "EntityName",
+          "example_value": "Exact textual reference from document",
+          "source_context": "Exact snippet from provided text"
         }}
       ]
-
     }}
 
-
     EUR-Lex text:
-
     {text}
