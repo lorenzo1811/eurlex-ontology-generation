@@ -1,0 +1,224 @@
+{
+  "ontology_name": "ImportLevyRegulationOntology_merged_CerealLevyOntology_merged_CerealTradeRestrictions_merged_AntiDumpingRegulationOntology_merged_EU_Reg_1985",
+  "description": "Merged ontology combining 'ImportLevyRegulationOntology_merged_CerealLevyOntology_merged_CerealTradeRestrictions_merged_AntiDumpingRegulationOntology' and 'EU_Reg_1985'.",
+  "odrl_alignment": {
+    "core_entities": [
+      "Asset",
+      "Party",
+      "Permission",
+      "Duty",
+      "Constraint"
+    ],
+    "extensions": []
+  },
+  "classes": [
+    {
+      "name": "Regulation",
+      "type": "ODRL_core",
+      "description": "A regulation establishing import levies on products derived from cereals and rice."
+    },
+    {
+      "name": "ImportLevy",
+      "type": "ODRL_core",
+      "description": "A levy imposed on imported cereals and rice as defined in Regulation (EEC) No 492/81."
+    },
+    {
+      "name": "CerealTradeRestriction",
+      "type": "ODRL_core",
+      "description": "A restriction on the trade of cereals based on specified starch and ash content."
+    },
+    {
+      "name": "AntiDumpingRole",
+      "type": "ODRL_core",
+      "description": "Represents roles involved in anti-dumping regulation."
+    }
+  ],
+  "relationships": [
+    {
+      "source": "Regulation",
+      "relation": "appliesTo",
+      "target": "CerealsRiceProducts",
+      "description": "The regulation applies to these specific products."
+    },
+    {
+      "source": "Party",
+      "relation": "appliesTo",
+      "target": "ImportLevy",
+      "description": "The party responsible for applying the levy."
+    },
+    {
+      "source": "Asset",
+      "relation": "isSubjectOf",
+      "target": "ImportLevy",
+      "description": "The asset (cereals and rice) subject to the levy."
+    },
+    {
+      "source": "Regulation",
+      "relation": "appliesTo",
+      "target": "ImportLevy",
+      "description": "The regulation establishes the levy."
+    },
+    {
+      "source": "ImportLevy",
+      "relation": "relatedTo",
+      "target": "CerealsRiceProducts",
+      "description": "The levy is related to the specific product subject to it."
+    },
+    {
+      "source": "AntiDumpingRole",
+      "relation": "appliesTo",
+      "target": "DefinitiveAntiDumpingTariffRate",
+      "description": "Role applies a duty rate."
+    },
+    {
+      "source": "AntiDumpingRole",
+      "relation": "assignsTo",
+      "target": "Party",
+      "description": "Role assigns duties to parties."
+    }
+  ],
+  "rights_model": {
+    "permissions": [
+      {
+        "action": "calculate_import_levy",
+        "asset": "CerealProducts",
+        "party": "RightsHolder",
+        "constraints": []
+      },
+      {
+        "action": "apply_levy_to_cereal_products",
+        "asset": "LeviesOnCerealsAndRice",
+        "party": "Assignee"
+      },
+      {
+        "action": "calculate_definitive_duty_rate",
+        "asset": "DefinitiveAntiDumpingTariffRate",
+        "party": "NipponSeikoKKandOthers",
+        "constraints": [
+          {
+            "name": "effective_date",
+            "value": "22 July 1984"
+          }
+        ]
+      },
+      {
+        "action": "apply_definitive_duty_rate",
+        "asset": "DefinitiveAntiDumpingTariffRate",
+        "party": "NipponSeikoKKandOthers",
+        "constraints": [
+          {
+            "name": "effective_date",
+            "value": "22 July 1984"
+          }
+        ]
+      },
+      {
+        "action": "apply_regulation",
+        "asset": "Regulation_1985",
+        "party": "Council_of_the_European_Communitys_President_F.M._PANDOLFI",
+        "constraints": [
+          {
+            "name": "effective_date",
+            "value": "22 July 1984"
+          },
+          {
+            "name": "valid_for",
+            "value": "all_Member_States"
+          }
+        ]
+      }
+    ],
+    "duties": [
+      {
+        "action": "pay_import_levy",
+        "party": "CerealProductsProducer"
+      },
+      {
+        "action": "pay_definitive_duty",
+        "party": "NipponSeikoKKandOthers",
+        "constraints": []
+      }
+    ]
+  },
+  "legal_patterns": [
+    {
+      "pattern_name": "LeviesAlterationPattern",
+      "description": "The process of adjusting import levies based on average levy rates and current market conditions.",
+      "entities_involved": [
+        "Regulation",
+        "CerealsRiceProducts"
+      ]
+    },
+    {
+      "pattern_name": "LeviesCalculationPattern",
+      "description": "The process of calculating import levies on cereals and rice.",
+      "entities_involved": [
+        "RightsHolder",
+        "Assignee"
+      ]
+    },
+    {
+      "pattern_name": "LevyApplicationPattern",
+      "description": "Applying levies to specific products based on CCT heading No.",
+      "entities_involved": [
+        "CerealProductsProducer",
+        "Asset"
+      ]
+    },
+    {
+      "pattern_name": "CerealTradeRestrictionPattern",
+      "description": "A pattern of legal restrictions on cereals based on starch and ash content.",
+      "entities_involved": [
+        "CerealTradeRestriction"
+      ]
+    },
+    {
+      "pattern_name": "AntiDumpingRateChangePattern",
+      "description": "Pattern for changes in anti-dumping duty rates due to errors or corrections.",
+      "entities_involved": [
+        "NipponSeikoKKandOthers",
+        "DefinitiveAntiDumpingTariffRate"
+      ]
+    },
+    {
+      "pattern_name": "Regulation_Application_Pattern",
+      "description": "The Regulation's application with respect to its effective date and scope.",
+      "entities_involved": [
+        "Regulation_1985",
+        "Council_of_the_European_Communitys_President_F.M._PANDOLFI"
+      ]
+    }
+  ],
+  "example_instances": [
+    {
+      "entity": "Regulation",
+      "example_value": "Commission Regulation (EEC) No 653/81 of 12 March 1981 altering the import levies on products processed from cereals and rice",
+      "source_context": "EUR-Lex text provided"
+    },
+    {
+      "entity": "CerealProductsProducer",
+      "example_value": "The producer of cereal and rice products must pay the import levy as per Regulation (EEC) No 492/81.",
+      "source_context": "Article 1: The import levies to be charged on products processed from cereals and rice covered by Regulation (EEC) No 2744/75, as last amended by Regulation (EEC) No 2245/78, as fixed in the Annex to amended Regulation (EEC) No 492/81 are hereby altered to the amounts set out in the Annex hereto."
+    },
+    {
+      "entity": "ImportLevy",
+      "example_value": "The import levy for products falling within heading Nos 11.01 and 11.02 is calculated based on CCT heading No as per Regulation (EEC) No 492/81.",
+      "source_context": "Article 1: The import levies to be charged on products processed from cereals and rice covered by Regulation (EEC) No 2744/75, as last amended by Regulation (EEC) No 2245/78, as fixed in the Annex to amended Regulation (EEC) No 492/81 are hereby altered to the amounts set out in the Annex hereto."
+    },
+    {
+      "entity": "CerealTradeRestriction",
+      "example_value": "products falling within heading Nos 11.01 and 11.02 and those falling within subheading 23.02 A, products falling within heading Nos 11.01 and 11.02 shall be those meeting the following specifications :",
+      "source_context": "products falling within heading Nos 11.01 and 11.02 and those falling within subheading 23.02 A, products falling within heading Nos 11.01 and 11.02 shall be those meeting the following specifications :"
+    },
+    {
+      "entity": "AntiDumpingRole",
+      "example_value": "COUNCIL OF THE EUROPEAN COMMUNITIES, Having regard to the Treaty establishing the European Economic Community",
+      "source_context": "EUR-Lex text: 'COUNCIL OF THE EUROPEAN COMMUNITIES, Having regard to the Treaty establishing the European Economic Community'"
+    },
+    {
+      "entity": "Regulation_1985",
+      "example_value": "This Regulation shall enter into force on the day of its publication in the Official Journal of the European Communities. It shall apply with effect from 22 July 1984.",
+      "source_context": "ticle 2 This Regulation shall enter into force on the day of its publication in the Official Journal of the European Communities. It shall apply with effect from 22 July 1984."
+    }
+  ]
+}

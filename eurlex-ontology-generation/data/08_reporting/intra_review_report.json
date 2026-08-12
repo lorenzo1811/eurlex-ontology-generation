@@ -1,0 +1,41 @@
+{
+  "Regulation_Levies_Ontology": [
+    {
+      "action": "no_change",
+      "concepts_involved": [],
+      "reason": "No redundant concepts found. The ontology accurately represents the given information and does not require merging of similar concepts."
+    }
+  ],
+  "Cereal_Levies_Ontology": [
+    {
+      "action": "merged_concepts",
+      "concepts_involved": [
+        "Levy"
+      ],
+      "reason": "The class 'Levy' and 'ImportLevy' represent the same concept \u2013 a levy imposed on imported cereals and rice. Consolidation simplifies the ontology."
+    }
+  ],
+  "CerealTradeRestrictions": [
+    {
+      "action": "no_change",
+      "concepts_involved": [],
+      "reason": "No redundant concepts found"
+    }
+  ],
+  "Anti_Dumping_Regulation_Ontology": [
+    {
+      "action": "merged_concepts",
+      "concepts_involved": [
+        "AntiDumpingRole"
+      ],
+      "reason": "The 'Anti_Dumping_Role' class is a single, well-defined concept representing the roles involved in applying and assigning anti-dumping duties. No redundant concepts were found."
+    }
+  ],
+  "EU_Regulation_1985": [
+    {
+      "action": "no_change",
+      "concepts_involved": [],
+      "reason": "No redundant concepts found"
+    }
+  ]
+}

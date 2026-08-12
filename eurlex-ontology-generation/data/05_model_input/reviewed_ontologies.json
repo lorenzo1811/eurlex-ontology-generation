@@ -1,0 +1,334 @@
+[
+  {
+    "ontology_name": "ImportLevyRegulationOntology",
+    "description": "An ontology representing the import levy regulation on cereals and rice products.",
+    "odrl_alignment": {
+      "core_entities": [
+        "Asset",
+        "Party",
+        "Permission",
+        "Duty",
+        "Constraint"
+      ],
+      "extensions": []
+    },
+    "classes": [
+      {
+        "name": "Regulation",
+        "type": "ODRL_core",
+        "description": "A regulation establishing import levies on products derived from cereals and rice."
+      }
+    ],
+    "relationships": [
+      {
+        "source": "Regulation",
+        "relation": "appliesTo",
+        "target": "CerealsRiceProducts",
+        "description": "The regulation applies to these specific products."
+      }
+    ],
+    "rights_model": {
+      "permissions": [],
+      "duties": []
+    },
+    "legal_patterns": [
+      {
+        "pattern_name": "LeviesAlterationPattern",
+        "description": "The process of adjusting import levies based on average levy rates and current market conditions.",
+        "entities_involved": [
+          "Regulation",
+          "CerealsRiceProducts"
+        ]
+      }
+    ],
+    "example_instances": [
+      {
+        "entity": "Regulation",
+        "example_value": "Commission Regulation (EEC) No 653/81 of 12 March 1981 altering the import levies on products processed from cereals and rice",
+        "source_context": "EUR-Lex text provided"
+      }
+    ],
+    "_source_chunk_id": "31981R0653_0",
+    "_source_celex": "31981R0653"
+  },
+  {
+    "ontology_name": "CerealLevyOntology",
+    "description": "Legal framework for import levies on cereals and rice as per Regulation (EEC) No 492/81.",
+    "odrl_alignment": {
+      "core_entities": [
+        "Asset",
+        "Party",
+        "Permission",
+        "Duty",
+        "Constraint"
+      ],
+      "extensions": []
+    },
+    "classes": [
+      {
+        "name": "ImportLevy",
+        "type": "ODRL_core",
+        "description": "A levy imposed on imported cereals and rice as defined in Regulation (EEC) No 492/81."
+      }
+    ],
+    "relationships": [
+      {
+        "source": "Party",
+        "relation": "appliesTo",
+        "target": "ImportLevy",
+        "description": "The party responsible for applying the levy."
+      },
+      {
+        "source": "Asset",
+        "relation": "isSubjectOf",
+        "target": "ImportLevy",
+        "description": "The asset (cereals and rice) subject to the levy."
+      }
+    ],
+    "rights_model": {
+      "permissions": [
+        {
+          "action": "calculate_import_levy",
+          "asset": "CerealProducts",
+          "party": "RightsHolder",
+          "constraints": []
+        },
+        {
+          "action": "apply_levy_to_cereal_products",
+          "asset": "LeviesOnCerealsAndRice",
+          "party": "Assignee"
+        }
+      ],
+      "duties": [
+        {
+          "action": "pay_import_levy",
+          "party": "CerealProductsProducer"
+        }
+      ]
+    },
+    "legal_patterns": [
+      {
+        "pattern_name": "LeviesCalculationPattern",
+        "description": "The process of calculating import levies on cereals and rice.",
+        "entities_involved": [
+          "RightsHolder",
+          "Assignee"
+        ]
+      },
+      {
+        "pattern_name": "LevyApplicationPattern",
+        "description": "Applying levies to specific products based on CCT heading No.",
+        "entities_involved": [
+          "CerealProductsProducer",
+          "Asset"
+        ]
+      }
+    ],
+    "example_instances": [
+      {
+        "entity": "CerealProductsProducer",
+        "example_value": "The producer of cereal and rice products must pay the import levy as per Regulation (EEC) No 492/81.",
+        "source_context": "Article 1: The import levies to be charged on products processed from cereals and rice covered by Regulation (EEC) No 2744/75, as last amended by Regulation (EEC) No 2245/78, as fixed in the Annex to amended Regulation (EEC) No 492/81 are hereby altered to the amounts set out in the Annex hereto."
+      },
+      {
+        "entity": "ImportLevy",
+        "example_value": "The import levy for products falling within heading Nos 11.01 and 11.02 is calculated based on CCT heading No as per Regulation (EEC) No 492/81.",
+        "source_context": "Article 1: The import levies to be charged on products processed from cereals and rice covered by Regulation (EEC) No 2744/75, as last amended by Regulation (EEC) No 2245/78, as fixed in the Annex to amended Regulation (EEC) No 492/81 are hereby altered to the amounts set out in the Annex hereto."
+      }
+    ],
+    "_source_chunk_id": "31981R0653_1",
+    "_source_celex": "31981R0653"
+  },
+  {
+    "ontology_name": "CerealTradeRestrictions",
+    "description": "Legal restrictions on cereal trade based on starch and ash content specifications.",
+    "odrl_alignment": {
+      "core_entities": [
+        "Asset",
+        "Party",
+        "Permission",
+        "Duty",
+        "Constraint"
+      ],
+      "extensions": []
+    },
+    "classes": [
+      {
+        "name": "CerealTradeRestriction",
+        "type": "ODRL_core",
+        "description": "A restriction on the trade of cereals based on specified starch and ash content."
+      }
+    ],
+    "relationships": [],
+    "rights_model": {
+      "permissions": [],
+      "duties": []
+    },
+    "legal_patterns": [
+      {
+        "pattern_name": "CerealTradeRestrictionPattern",
+        "description": "A pattern of legal restrictions on cereals based on starch and ash content.",
+        "entities_involved": [
+          "CerealTradeRestriction"
+        ]
+      }
+    ],
+    "example_instances": [
+      {
+        "entity": "CerealTradeRestriction",
+        "example_value": "products falling within heading Nos 11.01 and 11.02 and those falling within subheading 23.02 A, products falling within heading Nos 11.01 and 11.02 shall be those meeting the following specifications :",
+        "source_context": "products falling within heading Nos 11.01 and 11.02 and those falling within subheading 23.02 A, products falling within heading Nos 11.01 and 11.02 shall be those meeting the following specifications :"
+      }
+    ],
+    "_source_chunk_id": "31981R0653_2",
+    "_source_celex": "31981R0653"
+  },
+  {
+    "ontology_name": "AntiDumpingRegulationOntology",
+    "description": "Ontology representing Anti-Dumping Regulation (EEC) No 1238/85, aligned with ODRL principles.",
+    "odrl_alignment": {
+      "core_entities": [
+        "Asset",
+        "Party",
+        "Permission",
+        "Duty",
+        "Constraint"
+      ],
+      "extensions": []
+    },
+    "classes": [
+      {
+        "name": "AntiDumpingRole",
+        "type": "ODRL_core",
+        "description": "Represents roles involved in anti-dumping regulation."
+      }
+    ],
+    "relationships": [
+      {
+        "source": "AntiDumpingRole",
+        "relation": "appliesTo",
+        "target": "DefinitiveAntiDumpingTariffRate",
+        "description": "Role applies a duty rate."
+      },
+      {
+        "source": "AntiDumpingRole",
+        "relation": "assignsTo",
+        "target": "Party",
+        "description": "Role assigns duties to parties."
+      }
+    ],
+    "rights_model": {
+      "permissions": [
+        {
+          "action": "calculate_definitive_duty_rate",
+          "asset": "DefinitiveAntiDumpingTariffRate",
+          "party": "NipponSeikoKKandOthers",
+          "constraints": [
+            {
+              "name": "effective_date",
+              "value": "22 July 1984"
+            }
+          ]
+        },
+        {
+          "action": "apply_definitive_duty_rate",
+          "asset": "DefinitiveAntiDumpingTariffRate",
+          "party": "NipponSeikoKKandOthers",
+          "constraints": [
+            {
+              "name": "effective_date",
+              "value": "22 July 1984"
+            }
+          ]
+        }
+      ],
+      "duties": [
+        {
+          "action": "pay_definitive_duty",
+          "party": "NipponSeikoKKandOthers",
+          "constraints": []
+        }
+      ]
+    },
+    "legal_patterns": [
+      {
+        "pattern_name": "AntiDumpingRateChangePattern",
+        "description": "Pattern for changes in anti-dumping duty rates due to errors or corrections.",
+        "entities_involved": [
+          "NipponSeikoKKandOthers",
+          "DefinitiveAntiDumpingTariffRate"
+        ]
+      }
+    ],
+    "example_instances": [
+      {
+        "entity": "AntiDumpingRole",
+        "example_value": "COUNCIL OF THE EUROPEAN COMMUNITIES, Having regard to the Treaty establishing the European Economic Community",
+        "source_context": "EUR-Lex text: 'COUNCIL OF THE EUROPEAN COMMUNITIES, Having regard to the Treaty establishing the European Economic Community'"
+      }
+    ],
+    "_source_chunk_id": "31985R1238_0",
+    "_source_celex": "31985R1238"
+  },
+  {
+    "ontology_name": "EU_Reg_1985",
+    "description": "Legal rights and obligations defined by the Regulation of May 13, 1985.",
+    "odrl_alignment": {
+      "core_entities": [
+        "Asset",
+        "Party",
+        "Permission",
+        "Duty",
+        "Constraint"
+      ],
+      "extensions": []
+    },
+    "classes": [
+      {
+        "name": "Regulation",
+        "type": "ODRL_core",
+        "description": "A legal instrument that is binding in its entirety and directly applicable."
+      }
+    ],
+    "relationships": [],
+    "rights_model": {
+      "permissions": [
+        {
+          "action": "apply_regulation",
+          "asset": "Regulation_1985",
+          "party": "Council_of_the_European_Communitys_President_F.M._PANDOLFI",
+          "constraints": [
+            {
+              "name": "effective_date",
+              "value": "22 July 1984"
+            },
+            {
+              "name": "valid_for",
+              "value": "all_Member_States"
+            }
+          ]
+        }
+      ],
+      "duties": []
+    },
+    "legal_patterns": [
+      {
+        "pattern_name": "Regulation_Application_Pattern",
+        "description": "The Regulation's application with respect to its effective date and scope.",
+        "entities_involved": [
+          "Regulation_1985",
+          "Council_of_the_European_Communitys_President_F.M._PANDOLFI"
+        ]
+      }
+    ],
+    "example_instances": [
+      {
+        "entity": "Regulation_1985",
+        "example_value": "This Regulation shall enter into force on the day of its publication in the Official Journal of the European Communities. It shall apply with effect from 22 July 1984.",
+        "source_context": "ticle 2 This Regulation shall enter into force on the day of its publication in the Official Journal of the European Communities. It shall apply with effect from 22 July 1984."
+      }
+    ],
+    "_source_chunk_id": "31985R1238_1",
+    "_source_celex": "31985R1238"
+  }
+]
