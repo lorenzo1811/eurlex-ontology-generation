@@ -85,11 +85,6 @@ ontology_reviews:
   load_args:
     encoding: utf-8
 
-
-
-
-
-
 # The 5 ontologies after intra-ontology review (step a)
 reviewed_ontologies:
   type: json.JSONDataset
@@ -129,73 +124,3 @@ merge_trace:
   fs_args:
     open_args_save:
       encoding: utf-8
-
-
-
-
-
-
-# Alignment between ontology candidates
-ontology_aligned:
-  type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_aligned.csv
-  fs_args:
-    open_args_save:
-      encoding: utf-8
-    open_args_load:
-      encoding: utf-8
-  save_args:
-    index: False
-    encoding: utf-8
-  load_args:
-    encoding: utf-8
-  
-# NetworkX graph built from ontology alignment results
-ontology_alignment_graph:
-  type: pickle.PickleDataset
-  filepath: data/04_feature/ontology_alignment_graph.pkl
-
-# Nodes extracted from the ontology alignment graph
-ontology_graph_nodes:
-  type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_graph_nodes.csv
-  fs_args:
-    open_args_save:
-      encoding: utf-8
-    open_args_load:
-      encoding: utf-8
-  save_args:
-    index: False
-    encoding: utf-8
-  load_args:
-    encoding: utf-8
-
-# Edges extracted from the ontology alignment graph
-ontology_graph_edges:
-  type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_graph_edges.csv
-  fs_args:
-    open_args_save:
-      encoding: utf-8
-    open_args_load:
-      encoding: utf-8
-  save_args:
-    index: False
-    encoding: utf-8
-  load_args:
-    encoding: utf-8
-
-# Unified ontology obtained from the five ontology candidates
-ontology_merged:
-  type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_merged.csv
-  fs_args:
-    open_args_save:
-      encoding: utf-8
-    open_args_load:
-      encoding: utf-8
-  save_args:
-    index: False
-    encoding: utf-8
-  load_args:
-    encoding: utf-8
