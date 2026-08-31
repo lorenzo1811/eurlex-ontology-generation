@@ -1,0 +1,105 @@
+[
+  {
+    "step": 1,
+    "merged_with": "CerealLevyOntology",
+    "rule_hits": [
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "Regulation",
+          "ImportLevy"
+        ],
+        "category_pair": [
+          "LegalInstrument",
+          "EconomicCharge"
+        ]
+      }
+    ],
+    "resulting_class_count": 2
+  },
+  {
+    "step": 2,
+    "merged_with": "CerealTradeRestrictions",
+    "rule_hits": [
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "CerealTradeRestriction",
+          "Regulation"
+        ],
+        "category_pair": [
+          "Restriction",
+          "LegalInstrument"
+        ]
+      }
+    ],
+    "resulting_class_count": 3
+  },
+  {
+    "step": 3,
+    "merged_with": "AntiDumpingRegulationOntology",
+    "rule_hits": [
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "AntiDumpingRole",
+          "Regulation"
+        ],
+        "category_pair": [
+          "PartyRole",
+          "LegalInstrument"
+        ]
+      }
+    ],
+    "resulting_class_count": 4
+  },
+  {
+    "step": 4,
+    "merged_with": "EU_Reg_1985",
+    "rule_hits": [
+      {
+        "rule_type": "equivalence",
+        "pair_classes": [
+          "Regulation",
+          "Regulation"
+        ],
+        "category": "LegalInstrument",
+        "similarity": 1.0
+      },
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "Regulation",
+          "ImportLevy"
+        ],
+        "category_pair": [
+          "LegalInstrument",
+          "EconomicCharge"
+        ]
+      },
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "CerealTradeRestriction",
+          "Regulation"
+        ],
+        "category_pair": [
+          "Restriction",
+          "LegalInstrument"
+        ]
+      },
+      {
+        "rule_type": "relationship_inference",
+        "pair_classes": [
+          "AntiDumpingRole",
+          "Regulation"
+        ],
+        "category_pair": [
+          "PartyRole",
+          "LegalInstrument"
+        ]
+      }
+    ],
+    "resulting_class_count": 4
+  }
+]

@@ -1,0 +1,52 @@
+[
+  {
+    "ontology_name": "ImportLevyRegulationOntology",
+    "classifications": [
+      {
+        "class": "Regulation",
+        "category": "LegalInstrument",
+        "reason": "A regulation is a type of legal instrument."
+      }
+    ]
+  },
+  {
+    "ontology_name": "CerealLevyOntology",
+    "classifications": [
+      {
+        "class": "ImportLevy",
+        "category": "EconomicCharge",
+        "reason": "An import levy is a monetary obligation related to trade."
+      }
+    ]
+  },
+  {
+    "ontology_name": "CerealTradeRestrictions",
+    "classifications": [
+      {
+        "class": "CerealTradeRestriction",
+        "category": "Restriction",
+        "reason": "This class specifically represents restrictions on cereal trade."
+      }
+    ]
+  },
+  {
+    "ontology_name": "AntiDumpingRegulationOntology",
+    "classifications": [
+      {
+        "class": "AntiDumpingRole",
+        "category": "PartyRole",
+        "reason": "AntiDumpingRole represents a role within the regulatory process related to anti-dumping investigations and actions."
+      }
+    ]
+  },
+  {
+    "ontology_name": "EU_Reg_1985",
+    "classifications": [
+      {
+        "class": "Regulation",
+        "category": "LegalInstrument",
+        "reason": "EU_Reg_1985 is a regulation, a type of legal instrument."
+      }
+    ]
+  }
+]

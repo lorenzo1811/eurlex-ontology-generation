@@ -1,0 +1,117 @@
+{
+  "equivalence_rules": [
+    {
+      "rule_id": "ER-001",
+      "condition": {
+        "category_in": [
+          "LegalInstrument"
+        ]
+      },
+      "action": "allow_merge",
+      "reason": "LegalInstruments can be considered equivalent to themselves."
+    },
+    {
+      "rule_id": "ER-002",
+      "condition": {
+        "category_in": [
+          "EconomicCharge"
+        ]
+      },
+      "action": "allow_merge",
+      "reason": "EconomicCharges can be considered equivalent to themselves."
+    },
+    {
+      "rule_id": "ER-003",
+      "condition": {
+        "category_in": [
+          "PartyRole"
+        ]
+      },
+      "action": "allow_merge",
+      "reason": "PartyRoles can be considered equivalent to themselves."
+    },
+    {
+      "rule_id": "ER-004",
+      "condition": {
+        "category_in": [
+          "Restriction"
+        ]
+      },
+      "action": "allow_merge",
+      "reason": "Restrictions can be considered equivalent to themselves."
+    }
+  ],
+  "prohibition_rules": [
+    {
+      "rule_id": "PR-001",
+      "condition": {
+        "category_pair": [
+          "LegalInstrument",
+          "EconomicCharge"
+        ]
+      },
+      "action": "forbid_merge",
+      "reason": "LegalInstruments and EconomicCharges represent fundamentally different concepts and cannot be merged."
+    },
+    {
+      "rule_id": "PR-002",
+      "condition": {
+        "category_pair": [
+          "PartyRole",
+          "Asset"
+        ]
+      },
+      "action": "forbid_merge",
+      "reason": "PartyRoles and Assets represent distinct categories of entities within a legal system; merging them is not logically valid."
+    },
+    {
+      "rule_id": "PR-003",
+      "condition": {
+        "category_pair": [
+          "Restriction",
+          "LegalInstrument"
+        ]
+      },
+      "action": "forbid_merge",
+      "reason": "Restrictions are limitations *imposed* by LegalInstruments, not the same concept."
+    }
+  ],
+  "relationship_inference_rules": [
+    {
+      "rule_id": "RR-001",
+      "condition": {
+        "category_pair": [
+          "LegalInstrument",
+          "EconomicCharge"
+        ]
+      },
+      "action": "infer_relationship",
+      "relation": "establishes",
+      "reason": "A LegalInstrument often establishes the terms of an EconomicCharge."
+    },
+    {
+      "rule_id": "RR-002",
+      "condition": {
+        "category_pair": [
+          "PartyRole",
+          "LegalInstrument"
+        ]
+      },
+      "action": "infer_relationship",
+      "relation": "represents",
+      "reason": "A PartyRole represents the role assigned by a LegalInstrument."
+    },
+    {
+      "rule_id": "RR-003",
+      "condition": {
+        "category_pair": [
+          "Restriction",
+          "LegalInstrument"
+        ]
+      },
+      "action": "infer_relationship",
+      "relation": "limits",
+      "reason": "A Restriction limits the application or effect of a LegalInstrument."
+    }
+  ]
+}
