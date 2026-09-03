@@ -1,0 +1,345 @@
+import json
+import re
+import pandas as pd
+from ollama import chat
+
+
+# Node 1: revise ontologies based on judge review
+# Revise ontology candidates using a local LLM (Ollama), based on prior judge reviews
+def revise_ontologies(
+    ontology_reviews: pd.DataFrame,
+    max_candidates: int,
+    model: str,
+    temperature: float,
+    system_prompt: str,
+    user_prompt_template: str,
+    json_mode: bool,
+    expected_ontology_keys: list,
+    num_ctx: int,
+    num_predict: int,
+) -> pd.DataFrame:
+
+    results = []
+
+    for _, row in ontology_reviews.head(max_candidates).iterrows():
+
+        # Rows that were already approved don't need correction:
+        # keep the original ontology untouched
+        if not row["revision_required"]:
+            results.append(
+                {
+                    "chunk_id": row["chunk_id"],
+                    "CELEX": row["CELEX"],
+                    "text": row["text"],
+                    "ontology": row["ontology"],
+                    "revised": False,
+                    "revision_status": "skipped_not_required",
+                }
+            )
+            continue
+
+        user_prompt = user_prompt_template.format(
+            ontology=row["ontology"],
+            text=row["text"],
+            review=row["review"],
+        )
+
+        # Query the local LLM through Ollama.
+        # num_ctx / num_predict sized generously to avoid output truncation
+        # on long prompts (source text + candidate ontology + review).
+        response = chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            options={
+                "temperature": temperature,
+                "num_ctx": num_ctx,
+                "num_predict": num_predict,
+            },
+            format="json" if json_mode else None,
+        )
+
+        revision_text = response["message"]["content"]
+
+        # Capture Ollama's stop reason.
+        # "length"  -> generation was cut off because num_predict was hit
+        #              (the output is very likely truncated mid-JSON).
+        # "stop"    -> the model finished naturally.
+        # Falls back to "unknown" if the field is not present in the
+        # response (older Ollama versions / different client shapes).
+        done_reason = response.get("done_reason", "unknown")
+
+        # Parse the JSON returned by the LLM.
+        # extract_json returns (parsed_dict, used_fallback).
+        revised_ontology_json, used_fallback = extract_json(
+            revision_text, row["ontology"]
+        )
+
+        # Strip any top-level key that does not belong to the ontology schema.
+        revised_ontology_json, had_extra_keys = _strip_unexpected_keys(
+            revised_ontology_json, expected_ontology_keys
+        )
+
+        # Deterministically rebuild odrl_alignment.extensions from the
+        # NAMES of every class of type "Legal_extension".
+        revised_ontology_json = _sync_extensions_with_classes(revised_ontology_json)
+
+        is_revised = not used_fallback
+
+        if used_fallback:
+            # Distinguish a genuine truncation (fixable by raising
+            # num_predict/num_ctx further) from any other parsing failure
+            # (e.g. malformed JSON despite fitting within the token budget).
+            status = (
+                "failed_truncated_output"
+                if done_reason == "length"
+                else "failed_fallback_original_kept"
+            )
+        elif had_extra_keys:
+            status = "revised_with_extra_keys_stripped"
+        else:
+            status = "revised"
+
+        results.append(
+            {
+                "chunk_id": row["chunk_id"],
+                "CELEX": row["CELEX"],
+                "text": row["text"],
+                "ontology": json.dumps(revised_ontology_json, ensure_ascii=False),
+                "revised": is_revised,
+                "revision_status": status,
+            }
+        )
+
+    return pd.DataFrame(results)
+
+
+# Node 2: validate revised ontologies (schema + grounding checks)
+"""Run lightweight structural and grounding checks on the revised
+ontologies and attach a validation report to each row.
+
+Checks performed:
+- schema_valid: top-level keys match expected_ontology_keys exactly.
+- invalid_class_type: classes whose "type" is neither a valid ODRL
+    core type nor exactly "Legal_extension".
+- extensions_without_class: values in odrl_alignment.extensions that
+    have no matching "name" in "classes".
+- classes_without_extension: classes of type "Legal_extension" not
+    declared in odrl_alignment.extensions.
+- possible_hallucination: currency terms found in the ontology that
+    are not present in the source text, using word-boundary matching
+    AND excluding known false-positive phrases (e.g. "EUR-Lex") before
+    the check runs -- FIXED.
+"""
+def validate_revised_ontologies(
+    ontology_revised: pd.DataFrame,
+    expected_ontology_keys: list,
+    disallowed_currency_terms: list,
+    valid_odrl_core_types: list,
+    currency_check_exclusions: list,
+) -> pd.DataFrame:
+    
+    valid_types = set(valid_odrl_core_types) | {"Legal_extension"}
+
+    reports = []
+
+    for _, row in ontology_revised.iterrows():
+        ontology = _safe_load(row["ontology"])
+        source_text = row.get("text", "") or ""
+
+        issues = []
+
+        if ontology is None:
+            issues.append("ontology_not_valid_json")
+            reports.append(_build_report(row, issues, schema_valid=False))
+            continue
+
+        # Schema check
+        actual_keys = set(ontology.keys())
+        expected_keys = set(expected_ontology_keys)
+        schema_valid = actual_keys == expected_keys
+        if not schema_valid:
+            missing = expected_keys - actual_keys
+            extra = actual_keys - expected_keys
+            if missing:
+                issues.append(f"missing_keys:{sorted(missing)}")
+            if extra:
+                issues.append(f"unexpected_keys:{sorted(extra)}")
+
+        classes = ontology.get("classes", [])
+        if not isinstance(classes, list):
+            classes = []
+
+        # Class "type" validity check
+        invalid_type_classes = [
+            c.get("name")
+            for c in classes
+            if isinstance(c, dict) and c.get("type") not in valid_types
+        ]
+        if invalid_type_classes:
+            issues.append(f"invalid_class_type:{sorted(n for n in invalid_type_classes if n)}")
+
+        # Extensions <-> classes consistency check
+        extensions = set(
+            ontology.get("odrl_alignment", {}).get("extensions", []) or []
+        )
+        class_names = {c.get("name") for c in classes if isinstance(c, dict)}
+        legal_extension_class_names = {
+            c.get("name")
+            for c in classes
+            if isinstance(c, dict) and c.get("type") == "Legal_extension"
+        }
+
+        extensions_without_class = extensions - class_names
+        classes_without_extension = legal_extension_class_names - extensions
+
+        if extensions_without_class:
+            issues.append(f"extensions_without_class:{sorted(extensions_without_class)}")
+        if classes_without_extension:
+            issues.append(f"classes_without_extension:{sorted(classes_without_extension)}")
+        
+        # Strip known false-positive phrases (e.g. "EUR-Lex", the EU legal
+        # database name, which is NOT the Euro currency) from BOTH the
+        # ontology text and the source text before matching, so mentions
+        # like "EUR-Lex text provided" no longer trigger a false alarm
+        # on the currency term "EUR".
+        ontology_str = json.dumps(ontology, ensure_ascii=False)
+        cleaned_ontology_str = _strip_exclusions(ontology_str, currency_check_exclusions)
+        cleaned_source_text = _strip_exclusions(source_text, currency_check_exclusions)
+
+        for term in disallowed_currency_terms:
+            term_pattern = r"\b" + re.escape(term) + r"\b"
+            term_in_ontology = re.search(term_pattern, cleaned_ontology_str) is not None
+            term_in_source = re.search(term_pattern, cleaned_source_text) is not None
+            if term_in_ontology and not term_in_source:
+                issues.append(f"possible_hallucination:{term}_not_in_source_text")
+
+        reports.append(_build_report(row, issues, schema_valid=schema_valid))
+
+    return pd.DataFrame(reports)
+
+
+def _build_report(row: pd.Series, issues: list, schema_valid: bool) -> dict:
+    return {
+        "chunk_id": row["chunk_id"],
+        "CELEX": row["CELEX"],
+        "revision_status": row.get("revision_status"),
+        "schema_valid": schema_valid,
+        "validation_passed": len(issues) == 0,
+        "issues": json.dumps(issues, ensure_ascii=False),
+    }
+
+
+# Helpers
+def _safe_load(ontology_field) -> dict | None:
+    """Load an ontology that may already be a dict or a JSON string."""
+    if isinstance(ontology_field, dict):
+        return ontology_field
+    try:
+        return json.loads(ontology_field)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _strip_unexpected_keys(ontology: dict, expected_keys: list) -> tuple[dict, bool]:
+    # Remove any top-level key not in expected_keys
+    expected = set(expected_keys)
+    extra_keys = [k for k in ontology.keys() if k not in expected]
+    if not extra_keys:
+        return ontology, False
+    cleaned = {k: v for k, v in ontology.items() if k in expected}
+    return cleaned, True
+
+
+def _sync_extensions_with_classes(ontology: dict) -> dict:
+    """Deterministically rebuild odrl_alignment.extensions from the NAMES
+    of every class of type 'Legal_extension'. Rebuilding (rather than only
+    adding) also drops stray/incorrect values the LLM may have put there
+    (e.g. a class "type" used instead of its "name").
+    """
+    if not isinstance(ontology, dict):
+        return ontology
+
+    classes = ontology.get("classes", [])
+    if not isinstance(classes, list):
+        return ontology
+
+    legal_ext_names = {
+        c.get("name")
+        for c in classes
+        if isinstance(c, dict) and c.get("type") == "Legal_extension" and c.get("name")
+    }
+
+    odrl_alignment = ontology.get("odrl_alignment")
+    if not isinstance(odrl_alignment, dict):
+        odrl_alignment = {}
+        ontology["odrl_alignment"] = odrl_alignment
+
+    odrl_alignment["extensions"] = sorted(legal_ext_names)
+
+    return ontology
+
+
+def _strip_exclusions(text: str, exclusions: list) -> str:
+    """Remove known false-positive phrases (case-insensitive) from a text
+    before running substring/word-boundary checks on it. Used to prevent
+    e.g. 'EUR-Lex' from being mistaken for the currency term 'EUR'.
+    """
+    cleaned = text
+    for phrase in exclusions:
+        cleaned = re.sub(re.escape(phrase), "", cleaned, flags=re.IGNORECASE)
+    return cleaned
+
+
+# Helper to safely extract JSON from LLM output.
+def extract_json(text: str, original_ontology: str) -> tuple[dict, bool]:
+
+    parsed_data = None
+
+    if not text or text.strip() == "":
+        return _build_fallback_json(original_ontology), True
+
+    cleaned_text = re.sub(r"^```json\s*", "", text.strip(), flags=re.MULTILINE)
+    cleaned_text = re.sub(r"^```\s*", "", cleaned_text, flags=re.MULTILINE)
+    cleaned_text = re.sub(r"```$", "", cleaned_text, flags=re.MULTILINE).strip()
+
+    try:
+        parsed_data = json.loads(cleaned_text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned_text, re.DOTALL)
+        if match:
+            try:
+                parsed_data = json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+    if not parsed_data or not isinstance(parsed_data, dict) or len(parsed_data) == 0:
+        return _build_fallback_json(original_ontology), True
+
+    return parsed_data, False
+
+
+def _build_fallback_json(original_ontology: str) -> dict:
+
+    try:
+        fallback = json.loads(original_ontology)
+        if isinstance(fallback, dict) and len(fallback) > 0:
+            return fallback
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return {
+        "ontology_name": "Unknown",
+        "description": "Revision failed: LLM output was empty/invalid and original ontology could not be parsed.",
+        "odrl_alignment": {
+            "core_entities": ["Asset", "Party", "Permission", "Duty", "Constraint"],
+            "extensions": [],
+        },
+        "classes": [],
+        "relationships": [],
+        "rights_model": {"permissions": [], "duties": []},
+        "legal_patterns": [],
+        "example_instances": [],
+    }

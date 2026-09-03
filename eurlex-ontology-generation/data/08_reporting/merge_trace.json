@@ -4,142 +4,98 @@
     "merged_with": "CerealLevyOntology",
     "merge_log": [
       {
-        "action": "added_cross_relationship",
-        "concepts_involved": [
-          "Regulation",
-          "ImportLevy"
-        ],
-        "reason": "The regulation establishes the levy."
-      },
-      {
         "action": "judge_reject",
         "concepts_involved": [
           "class_mapping[0]"
         ],
-        "reason": "Merging Regulation with ImportLevy is incorrect - one represents a legal instrument and the other an economic charge."
-      },
-      {
-        "action": "judge_approve",
-        "concepts_involved": [
-          "cross_relationship[0]"
-        ],
-        "reason": "Valid relationship between two existing classes."
-      },
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "cross_relationship[1]"
-        ],
-        "reason": "Source class 'CerealsRiceProducts' does not exist in the provided class lists."
-      }
-    ],
-    "resulting_class_count": 2
-  },
-  {
-    "step": 2,
-    "merged_with": "CerealTradeRestrictions",
-    "merge_log": [
-      {
-        "action": "added_cross_relationship",
-        "concepts_involved": [
-          "ImportLevy",
-          "CerealsRiceProducts"
-        ],
-        "reason": "The levy is related to the specific product subject to it."
-      },
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "class_mapping[0]"
-        ],
-        "reason": "Regulation is a legal instrument, CerealTradeRestriction represents a trade restriction - fundamentally different concepts."
-      },
-      {
-        "action": "judge_approve",
-        "concepts_involved": [
-          "cross_relationship[0]"
-        ],
-        "reason": "Valid relationship between two existing classes."
-      },
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "cross_relationship[1]"
-        ],
-        "reason": "Regulation establishes ImportLevy - a party/role (Regulation) cannot establish an economic charge (ImportLevy)."
-      }
-    ],
-    "resulting_class_count": 3
-  },
-  {
-    "step": 3,
-    "merged_with": "AntiDumpingRegulationOntology",
-    "merge_log": [
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "class_mapping[0]"
-        ],
-        "reason": "ImportLevy is an economic charge, DefinitiveAntiDumpingTariffRate is a legal instrument - never the same concept."
-      },
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "cross_relationship[0]"
-        ],
-        "reason": "CerealsRiceProducts is not a valid class name."
-      },
-      {
-        "action": "judge_reject",
-        "concepts_involved": [
-          "cross_relationship[1]"
-        ],
-        "reason": "'Regulation' governs 'AntiDumpingRole' - never the same concept."
-      }
-    ],
-    "resulting_class_count": 4
-  },
-  {
-    "step": 4,
-    "merged_with": "EU_Reg_1985",
-    "merge_log": [
-      {
-        "action": "merged_concepts",
-        "concepts_involved": [
-          "Regulation",
-          "Regulation"
-        ],
-        "reason": "Both represent a legal instrument."
-      },
-      {
-        "action": "judge_approve",
-        "concepts_involved": [
-          "class_mapping[0]"
-        ],
-        "reason": "Same real-world entity."
+        "reason": "Merging a Regulation with an ImportLevy is a prohibited combination."
       },
       {
         "action": "judge_reject",
         "concepts_involved": [
           "class_mapping[1]"
         ],
-        "reason": "A class representing a Party/role cannot be merged with an economic charge."
+        "reason": "Applying a regulation to CerealsRiceProducts is not a defined relationship."
+      },
+      {
+        "action": "judge_reject",
+        "concepts_involved": [
+          "class_mapping[2]"
+        ],
+        "reason": "Using Currency in a regulation is not a defined relationship."
+      },
+      {
+        "action": "judge_reject",
+        "concepts_involved": [
+          "class_mapping[3]"
+        ],
+        "reason": "Using ExchangeRate in a regulation is not a defined relationship."
       },
       {
         "action": "judge_reject",
         "concepts_involved": [
           "cross_relationship[0]"
         ],
-        "reason": "Source class 'ImportLevy' is an economic charge, target class 'CerealsRiceProducts' is a legal restriction - incorrect merge."
+        "reason": "Target 'Regulation' does not correspond to a valid class name."
+      }
+    ],
+    "resulting_class_count": 9
+  },
+  {
+    "step": 2,
+    "merged_with": "CerealTrade",
+    "merge_log": [
+      {
+        "action": "llm_failed_needs_manual_review",
+        "concepts_involved": [],
+        "reason": "LLM did not return a usable mapping after retries; no merges/relationships were applied automatically for this step."
+      }
+    ],
+    "resulting_class_count": 12
+  },
+  {
+    "step": 3,
+    "merged_with": "AntiDumpingTariffRate",
+    "merge_log": [
+      {
+        "action": "llm_failed_needs_manual_review",
+        "concepts_involved": [],
+        "reason": "LLM did not return a usable mapping after retries; no merges/relationships were applied automatically for this step."
+      }
+    ],
+    "resulting_class_count": 14
+  },
+  {
+    "step": 4,
+    "merged_with": "EU_Reg_1985",
+    "merge_log": [
+      {
+        "action": "llm_failed_needs_manual_review",
+        "concepts_involved": [],
+        "reason": "LLM did not return a usable mapping after retries; no merges/relationships were applied automatically for this step."
       },
       {
         "action": "judge_reject",
         "concepts_involved": [
-          "cross_relationship[1]"
+          "class_mapping[0]"
         ],
-        "reason": "Source class 'AntiDumpingRole' is a Party/role, target class 'DefinitiveAntiDumpingTariffRate' is an economic charge - incorrect merge."
+        "reason": "ImportLevyRegulation and Regulation represent different concepts - one is a regulation, the other is a regulation related to imports."
+      },
+      {
+        "action": "judge_reject",
+        "concepts_involved": [
+          "class_mapping[1]"
+        ],
+        "reason": "CerealsRiceProducts and Cereals represent different concepts - one is a product category, the other is a product."
+      },
+      {
+        "action": "judge_reject",
+        "concepts_involved": [
+          "cross_relationship[0]"
+        ],
+        "reason": "No valid classes to relate."
       }
     ],
-    "resulting_class_count": 4
+    "resulting_class_count": 15
   }
 ]

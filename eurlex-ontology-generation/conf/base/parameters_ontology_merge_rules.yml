@@ -28,6 +28,23 @@ ontology_merge_rules:
     Classify EVERY class given. Do not skip any. Do not invent classes.
 
   concept_profiling_user_prompt_template: |
+    Here is a worked EXAMPLE (unrelated to the real data below):
+
+    EXAMPLE - Ontology: TrafficRegulationExample
+    EXAMPLE - Classes to classify: ["Vehicle", "SpeedLimit", "Driver"]
+    EXAMPLE - Available categories: ["LegalInstrument", "EconomicCharge", "PartyRole", "Asset", "Restriction", "Other"]
+
+    EXAMPLE OUTPUT:
+    {{
+      "classifications": [
+        {{"class": "Vehicle", "category": "Asset", "reason": "A physical object subject to regulation."}},
+        {{"class": "SpeedLimit", "category": "Restriction", "reason": "A limitation imposed on behavior."}},
+        {{"class": "Driver", "category": "PartyRole", "reason": "A role played by a person."}}
+      ]
+    }}
+
+    Now classify the REAL data below.
+
     Ontology: {ontology_name}
     Classes to classify: {classes}
     Available categories: {categories}

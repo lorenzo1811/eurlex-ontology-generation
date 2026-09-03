@@ -1,0 +1,6 @@
+chunk_id,CELEX,revision_status,schema_valid,validation_passed,issues
+31981R0653_0,31981R0653,revised,True,True,[]
+31981R0653_1,31981R0653,revised,True,False,"[""invalid_class_type:['Duty', 'Levy']""]"
+31981R0653_2,31981R0653,revised,True,True,[]
+31985R1238_0,31985R1238,revised,True,True,[]
+31985R1238_1,31985R1238,revised,True,True,[]

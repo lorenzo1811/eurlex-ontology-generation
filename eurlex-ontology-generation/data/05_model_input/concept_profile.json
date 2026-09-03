@@ -1,11 +1,26 @@
 [
   {
-    "ontology_name": "ImportLevyRegulationOntology",
+    "ontology_name": "CerealsRiceLevies",
     "classifications": [
       {
-        "class": "Regulation",
+        "class": "ImportLevyRegulation",
         "category": "LegalInstrument",
-        "reason": "A regulation is a type of legal instrument."
+        "reason": "A regulation governing levies."
+      },
+      {
+        "class": "CerealsRiceProducts",
+        "category": "Asset",
+        "reason": "Products subject to the levy."
+      },
+      {
+        "class": "Currency",
+        "category": "Asset",
+        "reason": "A monetary unit."
+      },
+      {
+        "class": "ExchangeRate",
+        "category": "EconomicCharge",
+        "reason": "Refers to a monetary value and thus an economic charge."
       }
     ]
   },
@@ -15,27 +30,62 @@
       {
         "class": "ImportLevy",
         "category": "EconomicCharge",
-        "reason": "An import levy is a monetary obligation related to trade."
-      }
-    ]
-  },
-  {
-    "ontology_name": "CerealTradeRestrictions",
-    "classifications": [
+        "reason": "A levy related to imports."
+      },
       {
-        "class": "CerealTradeRestriction",
-        "category": "Restriction",
-        "reason": "This class specifically represents restrictions on cereal trade."
-      }
-    ]
-  },
-  {
-    "ontology_name": "AntiDumpingRegulationOntology",
-    "classifications": [
+        "class": "Regulation",
+        "category": "LegalInstrument",
+        "reason": "A legal act establishing the levy."
+      },
       {
-        "class": "AntiDumpingRole",
+        "class": "CCT",
         "category": "PartyRole",
-        "reason": "AntiDumpingRole represents a role within the regulatory process related to anti-dumping investigations and actions."
+        "reason": "Likely refers to a role within a regulatory framework."
+      },
+      {
+        "class": "ECU",
+        "category": "EconomicCharge",
+        "reason": "Likely represents an economic unit or charge."
+      },
+      {
+        "class": "MemberState",
+        "category": "PartyRole",
+        "reason": "A role representing a governmental entity."
+      }
+    ]
+  },
+  {
+    "ontology_name": "CerealTrade",
+    "classifications": [
+      {
+        "class": "TradeRestriction",
+        "category": "Restriction",
+        "reason": "A constraint on trade activity."
+      },
+      {
+        "class": "Cereal",
+        "category": "Asset",
+        "reason": "A product subject to trade regulations."
+      },
+      {
+        "class": "Specification",
+        "category": "Restriction",
+        "reason": "Defines requirements, acting as a limitation."
+      }
+    ]
+  },
+  {
+    "ontology_name": "AntiDumpingTariffRate",
+    "classifications": [
+      {
+        "class": "AntiDumpingRate",
+        "category": "EconomicCharge",
+        "reason": "A rate applied to imports."
+      },
+      {
+        "class": "TariffRate",
+        "category": "EconomicCharge",
+        "reason": "A rate applied to imports."
       }
     ]
   },
@@ -45,7 +95,12 @@
       {
         "class": "Regulation",
         "category": "LegalInstrument",
-        "reason": "EU_Reg_1985 is a regulation, a type of legal instrument."
+        "reason": "A legal act."
+      },
+      {
+        "class": "OfficialJournal",
+        "category": "LegalInstrument",
+        "reason": "A publication of legal acts."
       }
     ]
   }

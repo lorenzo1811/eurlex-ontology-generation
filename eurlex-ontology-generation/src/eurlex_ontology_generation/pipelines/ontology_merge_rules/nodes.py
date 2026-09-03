@@ -78,14 +78,30 @@ def profile_concepts(
             categories=json.dumps(CONCEPT_CATEGORIES, ensure_ascii=False),
         )
 
-        result = _call_llm_json_with_retry(
-            system_prompt, user_prompt, model, temperature, json_mode,
-            required_keys={"classifications"},
-        )
+        try:
+            result = _call_llm_json_with_retry(
+                system_prompt, user_prompt, model, temperature, json_mode,
+                required_keys={"classifications"},
+            )
+            classifications = result.get("classifications", [])
+        except ValueError as e:
+            # Graceful degradation: one ontology's profiling failure should
+            # not discard the whole pipeline run. Fall back to "Other" for
+            # every class in this ontology - the safest possible default,
+            # since no rule ever treats "Other" as compatible for merging.
+            logger.error(
+                "Profiling failed for ontology '%s' after retries - falling back "
+                "to category 'Other' for all its classes. Flag for manual review. Error: %s",
+                onto_name, e,
+            )
+            classifications = [
+                {"class": c, "category": "Other", "reason": "Profiling failed - manual review needed."}
+                for c in classes
+            ]
 
         profile.append({
             "ontology_name": onto_name,
-            "classifications": result.get("classifications", []),
+            "classifications": classifications,
         })
         logger.info("Profiled %d classes for '%s'.", len(classes), onto_name)
 
@@ -196,13 +212,15 @@ def _apply_rules_to_pair(
     a_classes = [c["name"] for c in ontology_a.get("classes", [])]
     b_classes = [c["name"] for c in ontology_b.get("classes", [])]
 
+    # Same CELEX = same underlying legal document (ontologies from different
+    # chunks of the same act). Different CELEX = different legal instruments,
+    # even if generically named the same way (e.g. both called "Regulation").
+    same_source_document = ontology_a.get("_source_celex") == ontology_b.get("_source_celex")
+
     prohibited_pairs = {
         tuple(sorted(r["condition"]["category_pair"]))
         for r in rules.get("prohibition_rules", [])
     }
-    # Keep the ORIGINAL order from the rule (not sorted): direction matters -
-    # "LegalInstrument establishes EconomicCharge" is not the same claim as
-    # the reverse, so only the stated direction should ever fire.
     relationship_rules_ordered = {
         tuple(r["condition"]["category_pair"]): r["relation"]
         for r in rules.get("relationship_inference_rules", [])
@@ -218,27 +236,35 @@ def _apply_rules_to_pair(
             cat_b = category_lookup.get(b_name, "Other")
 
             if cat_a == cat_b:
-                # Same category: candidate for merging, never for a relationship.
                 similarity = _name_similarity(a_name, b_name)
-                if similarity >= name_similarity_threshold:
+                # Require near-exact name match across different source
+                # documents, to avoid merging unrelated legal instruments
+                # that merely share a generic category and a loosely
+                # similar name (e.g. "Regulation" vs "ImportLevyRegulation"
+                # from two completely different CELEX acts).
+                effective_threshold = (
+                    name_similarity_threshold if same_source_document else 0.9
+                )
+                if similarity >= effective_threshold:
                     class_mappings.append({
                         "a_class": a_name,
                         "b_class": b_name,
                         "merged_name": a_name,
-                        "reason": f"Same category ({cat_a}), name similarity {similarity:.2f}.",
+                        "reason": (
+                            f"Same category ({cat_a}), name similarity {similarity:.2f}, "
+                            f"{'same' if same_source_document else 'different'} source document."
+                        ),
                     })
                     rule_hits.append({
                         "rule_type": "equivalence",
                         "pair_classes": [a_name, b_name],
                         "category": cat_a,
                         "similarity": round(similarity, 2),
+                        "same_source_document": same_source_document,
                     })
                 continue
 
-            # Different categories: never merge - only check for a directed
-            # relationship rule, independent of whether the pair is also
-            # explicitly listed as prohibited (prohibition is documentation
-            # here, since the engine never merges across categories anyway).
+            # (resto invariato: relationship_inference / prohibition_no_relationship)
             ordered_pair = (cat_a, cat_b)
             if ordered_pair in relationship_rules_ordered:
                 relation = relationship_rules_ordered[ordered_pair]
@@ -254,10 +280,6 @@ def _apply_rules_to_pair(
                     "category_pair": list(ordered_pair),
                 })
             elif tuple(reversed(ordered_pair)) in relationship_rules_ordered:
-                # Same rule, but the classes came up in the opposite order
-                # this time round the loop. Look it up under its declared
-                # direction and swap source/target so the relation's meaning
-                # stays correct regardless of loop iteration order.
                 reversed_pair = tuple(reversed(ordered_pair))
                 relation = relationship_rules_ordered[reversed_pair]
                 cross_relationships.append({

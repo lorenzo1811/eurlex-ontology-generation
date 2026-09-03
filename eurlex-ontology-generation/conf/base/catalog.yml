@@ -85,6 +85,25 @@ ontology_reviews:
   load_args:
     encoding: utf-8
 
+ontology_revision_report:
+  type: pandas.CSVDataset
+  filepath: data/08_reporting/ontology_revision_report.csv  
+
+# Ontologies revised following previous amendments by the judge LLM
+ontology_revised:
+  type: pandas.CSVDataset
+  filepath: data/04_feature/ontology_revised.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+    open_args_load:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8
+
 # The 5 ontologies after intra-ontology review (step a)
 reviewed_ontologies:
   type: json.JSONDataset

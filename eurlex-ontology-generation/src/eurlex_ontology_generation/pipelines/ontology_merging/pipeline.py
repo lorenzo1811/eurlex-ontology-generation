@@ -12,7 +12,7 @@ def create_pipeline(**kwargs) -> Pipeline:
         [
             node(
                 func=parse_ontology_candidates,
-                inputs="ontology_candidates",
+                inputs="ontology_revised",
                 outputs="parsed_ontologies",
                 name="parse_ontology_candidates_node",
             ),
