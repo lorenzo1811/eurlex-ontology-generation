@@ -1,0 +1,17 @@
+batch_id,chunk_id,CELEX,revision_status,schema_valid,validation_passed,issues
+0,32019D0276_0,32019D0276,revised,True,True,[]
+0,32019D0276_1,32019D0276,revised,True,True,[]
+0,32019D0276_2,32019D0276,revised,True,True,[]
+0,32019D0277_0,32019D0277,revised,True,True,[]
+0,32019D0277_1,32019D0277,revised,True,True,[]
+1,32019D0275_0,32019D0275,revised,True,True,[]
+1,32019D0275_1,32019D0275,revised,True,True,[]
+1,32018D1859_0,32018D1859,revised,True,True,[]
+1,32018D1859_1,32018D1859,revised,True,True,[]
+1,32018D1859_2,32018D1859,revised,True,True,[]
+2,32018D1720_0,32018D1720,revised,True,True,[]
+2,32018D1720_1,32018D1720,revised,True,True,[]
+2,32018D1675_0,32018D1675,revised,True,True,[]
+2,32018D1675_1,32018D1675,revised,True,True,[]
+2,32018D1505_0,32018D1505,revised,True,True,[]
+

@@ -16,7 +16,11 @@ data/**
 !data/**/
 
 # keep generated files from Kedro pipelines 03-08
-!data/03_primary/**
+!data/03_primary/chunk_batch_manifest.csv
+!data/03_primary/chunk_partition_manifest.csv
+!data/03_primary/eurlex_chunks.csv
+!data/03_primary/eurlex_sample.csv
+
 !data/04_feature/**
 !data/05_model_input/**
 !data/06_models/**

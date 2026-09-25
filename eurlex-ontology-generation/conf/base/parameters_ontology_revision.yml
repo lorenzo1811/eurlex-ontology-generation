@@ -6,10 +6,22 @@
 
 ontology_revision:
 
-  model: gemma3:4b
-  max_candidates: 5
+  model: gemma3:4b  
   temperature: 0.0
   json_mode: true
+
+  # The external batch orchestrator controls which batch is processed.
+  batch_id: 0
+  batch_group_size: 1000
+
+  # Persistent directory containing ontology-review results.
+  reviews_directory: data/04_feature/ontology_reviews
+
+  # Persistent directory containing revised ontologies.
+  output_directory: data/04_feature/ontology_revisions
+
+  # Persistent directory containing revision validation reports.
+  validation_output_directory: data/04_feature/ontology_revision_reports
 
   # Ollama generation options to avoid output truncation on long prompts (source text + ontology + review can be sizeable)
   num_ctx: 16384        # context window size (tokens)
@@ -27,6 +39,7 @@ ontology_revision:
     3. ADD MISSING CONCEPTS: Every concept listed in "missing_concepts" MUST be added BOTH as a string in "odrl_alignment.extensions" AND as a full entry in "classes" with its own "name", "type", and "description" grounded in the source text.
     4. REMOVE HALLUCINATIONS: Remove or correct every concept listed in "hallucinations" and "unsupported_concepts". Do not keep unsupported claims.
     5. VALID CLASS TYPES: The "type" field of every entry in "classes" MUST be either one of the ODRL core types (Asset, Party, RightsHolder, Permission, Prohibition, Duty, Constraint) or exactly the string "Legal_extension". NEVER invent a custom type such as "Rate", "Currency", or "Tariff" as a "type" value — those are concept names, not ODRL types. If a concept like "Rate" or "Currency" needs its own class, its "type" must be "Legal_extension", and "Rate"/"Currency" is its "name".
+    If a class in the Candidate Ontology has an invalid "type" (for example "ODRL_core"), you MUST replace it with the most appropriate ODRL core type (Asset, Party, RightsHolder, Permission, Prohibition, Duty, Constraint) or with "Legal_extension" if none fits. This rule takes precedence over rule 6.
     6. PRESERVE VALID CONTENT: Keep every class, relationship, and instance from the Candidate Ontology that was NOT flagged as wrong. Do not discard correct information.
     7. SCHEMA CONSTRAINT: The corrected ontology output MUST contain EXACTLY these top-level keys, nothing more and nothing less: "ontology_name", "description", "odrl_alignment", "classes", "relationships", "rights_model", "legal_patterns", "example_instances". NEVER include review-related fields such as "approved", "revision_required", "strengths", "weaknesses", "missing_concepts", "overall_score" in the output ontology.
     8. GROUNDING CONSTRAINT: Do not invent facts, entities, dates, currencies, or values that are not explicitly present in the provided source text. If the source text uses "ECU", do NOT convert or add "EUR" or any other currency not mentioned in the text. Never infer a modern currency (e.g. EUR) just because the topic is money — use only the currency actually named in the text.

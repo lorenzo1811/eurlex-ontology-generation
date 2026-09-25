@@ -1,14 +1,153 @@
 import json
 import re
+from pathlib import Path
+
 import pandas as pd
 from ollama import chat
+
+from typing import Literal
+from pydantic import BaseModel
+
+# Pydantic Schemas for Revised ODRL Ontology Validation
+
+class ODRLAlignment(BaseModel):
+    core_entities: list[str]
+    extensions: list[str]
+
+
+class OntologyClass(BaseModel):
+    name: str
+    type: Literal[
+        "Asset", "Party", "RightsHolder", "Permission",
+        "Prohibition", "Duty", "Constraint", "Legal_extension",
+    ]
+    description: str
+
+
+class Relationship(BaseModel):
+    source: str
+    relation: str
+    target: str
+    description: str = ""
+
+
+class ConstraintItem(BaseModel):
+    name: str
+    value: str
+
+
+class PermissionRule(BaseModel):
+    action: str
+    asset: str
+    party: str
+    constraints: list[ConstraintItem]
+
+
+class DutyRule(BaseModel):
+    action: str
+    party: str
+    constraints: list[ConstraintItem]
+
+
+class RightsModel(BaseModel):
+    permissions: list[PermissionRule]
+    duties: list[DutyRule]
+
+
+class LegalPattern(BaseModel):
+    pattern_name: str
+    description: str
+    entities_involved: list[str]
+
+
+class ExampleInstance(BaseModel):
+    entity: str
+    example_value: str
+    source_context: str
+
+
+class OntologyRevision(BaseModel):
+    ontology_name: str
+    description: str
+    odrl_alignment: ODRLAlignment
+    classes: list[OntologyClass]
+    relationships: list[Relationship]
+    rights_model: RightsModel
+    legal_patterns: list[LegalPattern]
+    example_instances: list[ExampleInstance]
+
+
+# Calculate the persistent group identifier for a batch
+def get_batch_group_id(
+    batch_id: int,
+    batch_group_size: int,
+) -> int:    
+
+    if batch_id < 0:
+        raise ValueError(
+            "batch_id must be greater than or equal to zero."
+        )
+
+    if batch_group_size <= 0:
+        raise ValueError(
+            "batch_group_size must be greater than zero."
+        )
+
+    return batch_id // batch_group_size
+
+
+# Load only the ontology reviews belonging to one batch
+def load_ontology_reviews(
+    batch_id: int,
+    batch_group_size: int,
+    reviews_directory: str,
+) -> pd.DataFrame:    
+
+    group_id = get_batch_group_id(
+        batch_id=batch_id,
+        batch_group_size=batch_group_size,
+    )
+
+    reviews_path = (
+        Path(reviews_directory)
+        / f"part_{group_id:03d}.csv"
+    )
+
+    if not reviews_path.exists():
+        raise FileNotFoundError(
+            f"Ontology reviews file not found: "
+            f"{reviews_path}"
+        )
+
+    reviews = pd.read_csv(
+        reviews_path,
+        encoding="utf-8",
+    )
+
+    batch_reviews = reviews[
+        reviews["batch_id"] == batch_id
+    ].copy()
+
+    batch_reviews["revision_required"] = (
+        batch_reviews["revision_required"]
+        .astype(str).str.strip().str.lower().eq("true")
+    )
+
+    if batch_reviews.empty:
+        raise ValueError(
+            f"No ontology reviews found for batch "
+            f"{batch_id} in {reviews_path}."
+        )
+
+    return batch_reviews.reset_index(drop=True)
 
 
 # Node 1: revise ontologies based on judge review
 # Revise ontology candidates using a local LLM (Ollama), based on prior judge reviews
 def revise_ontologies(
-    ontology_reviews: pd.DataFrame,
-    max_candidates: int,
+    batch_id: int,
+    batch_group_size: int,
+    reviews_directory: str,
     model: str,
     temperature: float,
     system_prompt: str,
@@ -19,15 +158,19 @@ def revise_ontologies(
     num_predict: int,
 ) -> pd.DataFrame:
 
+    ontology_reviews = load_ontology_reviews(
+        batch_id=batch_id,
+        batch_group_size=batch_group_size,
+        reviews_directory=reviews_directory,
+    )
+
     results = []
 
-    for _, row in ontology_reviews.head(max_candidates).iterrows():
-
-        # Rows that were already approved don't need correction:
-        # keep the original ontology untouched
+    for _, row in ontology_reviews.iterrows():
         if not row["revision_required"]:
             results.append(
                 {
+                    "batch_id": batch_id,
                     "chunk_id": row["chunk_id"],
                     "CELEX": row["CELEX"],
                     "text": row["text"],
@@ -44,9 +187,6 @@ def revise_ontologies(
             review=row["review"],
         )
 
-        # Query the local LLM through Ollama.
-        # num_ctx / num_predict sized generously to avoid output truncation
-        # on long prompts (source text + candidate ontology + review).
         response = chat(
             model=model,
             messages=[
@@ -58,40 +198,31 @@ def revise_ontologies(
                 "num_ctx": num_ctx,
                 "num_predict": num_predict,
             },
-            format="json" if json_mode else None,
+            # Schema al posto di "json": impone chiavi e tipi validi
+            format=OntologyRevision.model_json_schema() if json_mode else None,
         )
 
         revision_text = response["message"]["content"]
-
-        # Capture Ollama's stop reason.
-        # "length"  -> generation was cut off because num_predict was hit
-        #              (the output is very likely truncated mid-JSON).
-        # "stop"    -> the model finished naturally.
-        # Falls back to "unknown" if the field is not present in the
-        # response (older Ollama versions / different client shapes).
         done_reason = response.get("done_reason", "unknown")
 
-        # Parse the JSON returned by the LLM.
-        # extract_json returns (parsed_dict, used_fallback).
         revised_ontology_json, used_fallback = extract_json(
             revision_text, row["ontology"]
         )
 
-        # Strip any top-level key that does not belong to the ontology schema.
+        # Un'ontologia rivista senza classi non è una revisione valida
+        if not used_fallback and not revised_ontology_json.get("classes"):
+            revised_ontology_json = _build_fallback_json(row["ontology"])
+            used_fallback = True
+
         revised_ontology_json, had_extra_keys = _strip_unexpected_keys(
             revised_ontology_json, expected_ontology_keys
         )
 
-        # Deterministically rebuild odrl_alignment.extensions from the
-        # NAMES of every class of type "Legal_extension".
         revised_ontology_json = _sync_extensions_with_classes(revised_ontology_json)
 
         is_revised = not used_fallback
 
         if used_fallback:
-            # Distinguish a genuine truncation (fixable by raising
-            # num_predict/num_ctx further) from any other parsing failure
-            # (e.g. malformed JSON despite fitting within the token budget).
             status = (
                 "failed_truncated_output"
                 if done_reason == "length"
@@ -104,6 +235,7 @@ def revise_ontologies(
 
         results.append(
             {
+                "batch_id": batch_id,
                 "chunk_id": row["chunk_id"],
                 "CELEX": row["CELEX"],
                 "text": row["text"],
@@ -114,6 +246,59 @@ def revise_ontologies(
         )
 
     return pd.DataFrame(results)
+
+
+# Append the current batch revisions to the persistent revision file
+def persist_ontology_revisions(
+    ontology_revised: pd.DataFrame,
+    batch_id: int,
+    batch_group_size: int,
+    output_directory: str,
+) -> str:    
+
+    group_id = get_batch_group_id(
+        batch_id=batch_id,
+        batch_group_size=batch_group_size,
+    )
+
+    output_path = (
+        Path(output_directory)
+        / f"part_{group_id:03d}.csv"
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if output_path.exists():
+        existing = pd.read_csv(
+            output_path,
+            encoding="utf-8",
+        )
+
+        combined = pd.concat(
+            [
+                existing,
+                ontology_revised,
+            ],
+            ignore_index=True,
+        )
+
+        combined = combined.drop_duplicates(
+            subset=["chunk_id"],
+            keep="last",
+        )
+    else:
+        combined = ontology_revised.copy()
+
+    combined.to_csv(
+        output_path,
+        index=False,
+        encoding="utf-8",
+    )
+
+    return str(output_path)
 
 
 # Node 2: validate revised ontologies (schema + grounding checks)
@@ -131,7 +316,7 @@ Checks performed:
 - possible_hallucination: currency terms found in the ontology that
     are not present in the source text, using word-boundary matching
     AND excluding known false-positive phrases (e.g. "EUR-Lex") before
-    the check runs -- FIXED.
+    the check runs.
 """
 def validate_revised_ontologies(
     ontology_revised: pd.DataFrame,
@@ -223,6 +408,7 @@ def validate_revised_ontologies(
 
 def _build_report(row: pd.Series, issues: list, schema_valid: bool) -> dict:
     return {
+        "batch_id": row.get("batch_id"),
         "chunk_id": row["chunk_id"],
         "CELEX": row["CELEX"],
         "revision_status": row.get("revision_status"),
@@ -230,6 +416,59 @@ def _build_report(row: pd.Series, issues: list, schema_valid: bool) -> dict:
         "validation_passed": len(issues) == 0,
         "issues": json.dumps(issues, ensure_ascii=False),
     }
+
+
+# Append the current batch validation reports to the persistent report file
+def persist_validation_reports(
+    validation_reports: pd.DataFrame,
+    batch_id: int,
+    batch_group_size: int,
+    output_directory: str,
+) -> str:    
+
+    group_id = get_batch_group_id(
+        batch_id=batch_id,
+        batch_group_size=batch_group_size,
+    )
+
+    output_path = (
+        Path(output_directory)
+        / f"part_{group_id:03d}.csv"
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    if output_path.exists():
+        existing = pd.read_csv(
+            output_path,
+            encoding="utf-8",
+        )
+
+        combined = pd.concat(
+            [
+                existing,
+                validation_reports,
+            ],
+            ignore_index=True,
+        )
+
+        combined = combined.drop_duplicates(
+            subset=["chunk_id"],
+            keep="last",
+        )
+    else:
+        combined = validation_reports.copy()
+
+    combined.to_csv(
+        output_path,
+        index=False,
+        encoding="utf-8",
+    )
+
+    return str(output_path)
 
 
 # Helpers
