@@ -10,6 +10,7 @@ eurlex_raw:
   load_args:
     encoding: utf-8
 
+
 # Cleaned corpus prepared from the original dataset
 eurlex_corpus:
   type: pandas.CSVDataset
@@ -25,7 +26,8 @@ eurlex_corpus:
   load_args:
     encoding: utf-8
 
-# Sample of the corpus selected for ontology extraction
+
+# Sample of the corpus selected for ontology extraction (OLD)
 eurlex_sample:
   type: pandas.CSVDataset
   filepath: data/03_primary/eurlex_sample.csv
@@ -40,7 +42,8 @@ eurlex_sample:
   load_args:
     encoding: utf-8
 
-# Corpus split into chunks ready for LLM processing
+
+# Corpus split into chunks ready for LLM processing (OLD)
 eurlex_chunks:
   type: pandas.CSVDataset
   filepath: data/03_primary/eurlex_chunks.csv
@@ -55,14 +58,13 @@ eurlex_chunks:
   load_args:
     encoding: utf-8
 
-# Partial ontology extracted from each corpus chunk
-ontology_candidates:
+
+# Full corpus split into chunks
+eurlex_full_chunks:
   type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_candidates.csv
+  filepath: data/03_primary/eurlex_full_chunks.csv
   fs_args:
     open_args_save:
-      encoding: utf-8
-    open_args_load:
       encoding: utf-8
   save_args:
     index: False
@@ -70,41 +72,78 @@ ontology_candidates:
   load_args:
     encoding: utf-8
 
-# Reviews produced by the LLM judge for each ontology candidate
-ontology_reviews:
+
+# Manifest dataset tracking created chunk partitions, row ranges, and output file paths
+chunk_partition_manifest:
   type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_reviews.csv
+  filepath: data/03_primary/chunk_partition_manifest.csv
   fs_args:
     open_args_save:
-      encoding: utf-8
-    open_args_load:
       encoding: utf-8
   save_args:
     index: False
     encoding: utf-8
   load_args:
     encoding: utf-8
+
+
+# Manifest dataset summarizing metadata and status for each processing batch
+chunk_batch_manifest:
+  type: pandas.CSVDataset
+  filepath: data/03_primary/chunk_batch_manifest.csv
+  fs_args:
+    open_args_save:
+      encoding: utf-8
+  save_args:
+    index: False
+    encoding: utf-8
+  load_args:
+    encoding: utf-8
+
+
+# In-memory dataset holding the newly generated ontology candidates for the active batch
+ontology_candidates_batch:
+  type: MemoryDataset
+
+
+# In-memory dataset storing the output file path of the persisted partition CSV
+ontology_candidates_path:
+  type: MemoryDataset
+
+
+# In-memory dataset holding the currently selected chunk batch for processing
+current_chunk_batch:
+  type: MemoryDataset
+
+
+# Pipeline batch_orchestration doesn't create a new file, but edit chunk_batch_manifest.csv
+updated_chunk_batch_manifest:
+  type: MemoryDataset
+
+
+# Pipeline: ontology_review
+ontology_reviews_batch:
+  type: MemoryDataset
+
+ontology_reviews_path:
+  type: MemoryDataset
+
+
+# Pipeline: ontology_revision
+ontology_revised:
+  type: MemoryDataset
+
+ontology_revisions_path:
+  type: MemoryDataset
 
 ontology_revision_report:
-  type: pandas.CSVDataset
-  filepath: data/08_reporting/ontology_revision_report.csv  
+  type: MemoryDataset
 
-# Ontologies revised following previous amendments by the judge LLM
-ontology_revised:
-  type: pandas.CSVDataset
-  filepath: data/04_feature/ontology_revised.csv
-  fs_args:
-    open_args_save:
-      encoding: utf-8
-    open_args_load:
-      encoding: utf-8
-  save_args:
-    index: False
-    encoding: utf-8
-  load_args:
-    encoding: utf-8
+ontology_revision_reports_path:
+  type: MemoryDataset
 
-# The 5 ontologies after intra-ontology review (step a)
+
+# The 5 ontologies after intra-ontology review. Pipeline: ontology_merging (step a)
 reviewed_ontologies:
   type: json.JSONDataset
   filepath: data/05_model_input/reviewed_ontologies.json
@@ -114,7 +153,8 @@ reviewed_ontologies:
     open_args_save:
       encoding: utf-8
 
-# Readable log of intra-ontology merge decisions (step a)
+
+# Readable log of intra-ontology merge decisions. Pipeline: ontology_merging (step a)
 intra_review_report:
   type: json.JSONDataset
   filepath: data/08_reporting/intra_review_report.json
@@ -124,7 +164,8 @@ intra_review_report:
     open_args_save:
       encoding: utf-8
 
-# Final single ontology (step b)
+
+# Final single ontology. Pipeline: ontology_merging (step b)
 final_merged_ontology:
   type: json.JSONDataset
   filepath: data/07_model_output/final_merged_ontology.json
@@ -134,7 +175,8 @@ final_merged_ontology:
     open_args_save:
       encoding: utf-8
 
-# Step-by-step tracing of iterative merge (step b)
+
+# Step-by-step tracing of iterative merge. Pipeline: ontology_merging (step b)
 merge_trace:
   type: json.JSONDataset
   filepath: data/08_reporting/merge_trace.json
@@ -144,32 +186,37 @@ merge_trace:
     open_args_save:
       encoding: utf-8
 
-# Profile mapping each ontology class into a fixed category (Phase 1)
+
+# Profile mapping each ontology class into a fixed category. Pipeline: ontology_merge_rules (Phase 1)
 concept_profile:
   type: json.JSONDataset
   filepath: data/05_model_input/concept_profile.json
   save_args:
     indent: 2
 
-# Unvalidated ruleset extracted by the LLM from concept profile categories (Phase 2)
+
+# Unvalidated ruleset extracted by the LLM from concept profile categories. Pipeline: ontology_merge_rules (Phase 2)
 merge_rules_raw:
   type: MemoryDataset
 
-# Validated and sanitized ruleset ready for deterministic execution (Phase 3)
+
+# Validated and sanitized ruleset ready for deterministic execution. Pipeline: ontology_merge_rules (Phase 3)
 merge_rules:
   type: json.JSONDataset
   filepath: data/05_model_input/merge_rules.json
   save_args:
     indent: 2
 
-# Final single ontology produced via deterministic rule application (Phase 4)
+
+# Final single ontology produced via deterministic rule application. Pipeline: ontology_merge_rules (Phase 4)
 final_merged_ontology_v2:
   type: json.JSONDataset
   filepath: data/07_model_output/final_merged_ontology_v2.json
   save_args:
     indent: 2
 
-# Step-by-step log of rule hits during deterministic merging (Phase 4)
+
+# Step-by-step log of rule hits during deterministic merging. Pipeline: ontology_merge_rules (Phase 4)
 rule_application_trace:
   type: json.JSONDataset
   filepath: data/08_reporting/rule_application_trace.json
