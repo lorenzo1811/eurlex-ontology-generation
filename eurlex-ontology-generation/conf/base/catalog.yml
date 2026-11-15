@@ -34,6 +34,7 @@ eurlex_full_chunks:
   fs_args:
     open_args_save:
       encoding: utf-8
+      newline: ""   # keep the "\n" after the chunk header (Windows would write "\r\n")
   save_args:
     index: False
     encoding: utf-8

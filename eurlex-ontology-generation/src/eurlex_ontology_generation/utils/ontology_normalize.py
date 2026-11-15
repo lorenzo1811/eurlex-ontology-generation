@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from .changelog import change, class_target, rule_target
 from .entity_linking import Gazetteer, detect_kind, load_gazetteer
 from .ontology_schema import EXPECTED_TOP_LEVEL_KEYS, KINDS, RULE_KINDS
 from .vocabulary import Vocabulary, load_vocabulary, split_identifier
@@ -22,6 +23,8 @@ from .ontology_cleanup import cleanup_ontology
 from .ontology_grounding import constraint_is_ungrounded
 
 CORE_ENTITIES = ["Asset", "Constraint", "Duty", "Party", "Permission", "Prohibition"]
+# carried through normalisation: the LLM's quote and the located source (utils/provenance.py)
+PROVENANCE_FIELDS = ("evidence", "source")
 PLACEHOLDER_NAMES = {"targetparty", "responsibleparty", "party", "unknownparty", "genericparty",
                      "targetasset", "asset", "unknown", "none", "null", "na"}
 
@@ -92,8 +95,9 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
         onto, cleanup_notes = cleanup_ontology(onto, source_text, original=original)
         changes.extend(cleanup_notes)
 
-    def note(code: str, detail: str) -> None:
-        changes.append({"code": code, "detail": detail})
+    def note(code: str, detail: str, target: str | None = None, before=None, after=None) -> None:
+        changes.append(change(code, detail, actor="normalizer", target=target,
+                              before=before, after=after))
 
     out = {k: onto.get(k) for k in EXPECTED_TOP_LEVEL_KEYS}
     out["ontology_name"] = str(out.get("ontology_name") or "UnnamedOntology")
@@ -108,31 +112,38 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
         if not isinstance(name, str) or not name.strip():
             continue
         name = name.strip()
+        target = class_target(name)
         if split_composite(name, gazetteer):
             composites[name] = split_composite(name, gazetteer)
-            note("composite_class_split", f"{name} -> {composites[name]}")
+            note("composite_class_split", f"{name} -> {composites[name]}", target,
+                 before=name, after=composites[name])
             continue
         leak = vocab.metamodel_leakage(name)
         if leak:
             removed.add(name)
-            note("metamodel_leakage_removed", leak)
+            note("metamodel_leakage_removed", leak, target, before=cls)
             continue
         typed = type_entity(name, str(cls.get("description") or ""), vocab, gazetteer,
                             cls.get("type"), cls.get("is_a"),
                             cls.get("kind") if cls.get("kind") in KINDS else None)
         if cls.get("type") != typed["type"]:
-            note("class_retyped", f"{name}: {cls.get('type')} -> {typed['type']} ({typed['type_source']})")
+            note("class_retyped", f"{name} ({typed['type_source']})", target,
+                 before=cls.get("type"), after=typed["type"])
         if cls.get("is_a") and cls.get("is_a") != typed["is_a"]:
-            note("class_is_a_changed", f"{name}: {cls.get('is_a')} -> {typed['is_a']}")
+            note("class_is_a_changed", name, target, before=cls.get("is_a"), after=typed["is_a"])
         if cls.get("kind") != typed["kind"]:
-            note("class_kind_set", f"{name}: {cls.get('kind')} -> {typed['kind']} ({typed['kind_confidence']})")
+            note("class_kind_set", f"{name} ({typed['kind_confidence']})", target,
+                 before=cls.get("kind"), after=typed["kind"])
         entry = {"name": name, "type": typed["type"], "is_a": typed["is_a"], "kind": typed["kind"],
                  "description": str(cls.get("description") or "")}
         for extra in ("iri", "wikidata", "member_state", "related_individual"):
             if typed.get(extra) is not None:
                 entry[extra] = typed[extra]
+        for extra in PROVENANCE_FIELDS:
+            if cls.get(extra):
+                entry[extra] = cls[extra]
         if name in classes:
-            note("duplicate_class_removed", name)
+            note("duplicate_class_removed", name, target, before=cls)
             continue
         classes[name] = entry
 
@@ -141,7 +152,7 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
             return False
         if vocab.metamodel_leakage(name):
             removed.add(name)
-            note("metamodel_leakage_removed", f"reference '{name}'")
+            note("metamodel_leakage_removed", f"reference '{name}'", before=name)
             return False
         return True
 
@@ -160,22 +171,25 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                 expanded.append(rule)
         for rule in expanded:
             party = rule.get("party")
+            target = rule_target(kind, rule)
             if not ok_ref(party):
-                note("rule_dropped", f"{kind}: party '{party}' missing or removed")
+                note("rule_dropped", f"{kind}: party '{party}' missing or removed", target, before=rule)
                 continue
             norm = vocab.normalize_action(rule.get("action"), rule.get("action_label"))
             if norm["action"] != rule.get("action"):
                 note("action_normalized", f"{rule.get('action')} -> {norm['action']}"
-                     + (f" + object {norm['action_object']}" if norm["action_object"] else ""))
+                     + (f" + object {norm['action_object']}" if norm["action_object"] else ""),
+                     target, before=rule.get("action"), after=norm["action"])
             asset = rule.get("asset") or ""
             if asset and not ok_ref(asset):
-                note("asset_cleared", f"{kind}: asset '{asset}' was removed as leakage")
+                note("asset_cleared", f"{kind}: asset '{asset}' was removed as leakage", target,
+                     before=asset)
                 asset = ""
             constraints = []
             for c in _dicts(rule.get("constraints")):
                 sc = vocab.structure_constraint(c)
                 if sc is None:
-                    note("constraint_dropped", str(c)[:80])
+                    note("constraint_dropped", str(c)[:80], target, before=c)
                     continue
                 # drop values that have no trace in the source text (invented dates, amounts, currencies)
                 if source_text:
@@ -183,10 +197,13 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                     if reason:
                         note("constraint_ungrounded_dropped",
                              f"{sc.get('left_operand')} {sc.get('operator')} "
-                             f"{sc.get('right_operand')}: {reason}")
+                             f"{sc.get('right_operand')}: {reason}", target, before=sc)
                         continue
                 if "name" in c and "left_operand" not in c:
-                    note("constraint_structured", f"{c.get('name')} -> {sc['left_operand']} {sc['operator']}")
+                    note("constraint_structured", f"{c.get('name')} -> {sc['left_operand']} {sc['operator']}",
+                         target, before=c, after=sc)
+                if c.get("source"):
+                    sc["source"] = c["source"]
                 constraints.append(sc)
             new_rule = {"action": norm["action"], "action_label": norm["action_label"],
                         "action_object": norm["action_object"], "action_controlled": norm["controlled"],
@@ -195,6 +212,9 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                 new_rule["assigner"] = rule["assigner"]
             if rule.get("provision"):
                 new_rule["provision"] = rule["provision"]
+            for extra in PROVENANCE_FIELDS:
+                if rule.get(extra):
+                    new_rule[extra] = rule[extra]
             rules.append(new_rule)
         rights_model[kind] = rules
     out["rights_model"] = rights_model
@@ -208,14 +228,19 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
         rels_in += [{**rel, "source": s_, "target": t_} for s_ in srcs for t_ in tgts]
     for rel in rels_in:
         relation, src, tgt, controlled = vocab.normalize_relation(rel.get("relation"), rel.get("source"), rel.get("target"))
+        rel_target = f"relationships[{rel.get('source')} {rel.get('relation')} {rel.get('target')}]"
         if not (relation and ok_ref(src) and ok_ref(tgt)) or src == tgt:
-            note("relationship_dropped", f"{rel.get('source')} {rel.get('relation')} {rel.get('target')}")
+            note("relationship_dropped", f"{rel.get('source')} {rel.get('relation')} {rel.get('target')}",
+                 rel_target, before=rel)
             continue
         if relation != rel.get("relation") or src != rel.get("source"):
             note("relation_normalized", f"{rel.get('source')} {rel.get('relation')} {rel.get('target')}"
-                 f" -> {src} {relation} {tgt}")
+                 f" -> {src} {relation} {tgt}", rel_target,
+                 before=[rel.get("source"), rel.get("relation"), rel.get("target")],
+                 after=[src, relation, tgt])
         key = (src, relation, tgt)
         if key in seen:
+            note("relationship_duplicate_removed", f"{src} {relation} {tgt}", rel_target, before=rel)
             continue
         seen.add(key)
         relationships.append({"source": src, "relation": relation, "target": tgt,
@@ -234,7 +259,13 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                          "description": str(pat.get("description") or ""),
                          "entities_involved": ents})
     out["legal_patterns"] = patterns
-    out["example_instances"] = [i for i in _dicts(onto.get("example_instances")) if ok_ref(i.get("entity"))]
+    out["example_instances"] = []
+    for inst in _dicts(onto.get("example_instances")):
+        if ok_ref(inst.get("entity")):
+            out["example_instances"].append(inst)
+        else:
+            note("example_dropped_unresolved", f"entity '{inst.get('entity')}' missing or removed",
+                 f"example_instances[{inst.get('entity')}]", before=inst)
 
     # ---- referential closure: define every referenced name
     refs: list[str] = []
@@ -255,7 +286,8 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
         for extra in ("iri", "wikidata"):
             if typed.get(extra):
                 classes[ref][extra] = typed[extra]
-        note("undefined_entity_defined", f"{ref} as {typed['type']}/{typed['is_a']}")
+        note("undefined_entity_defined", f"{ref} as {typed['type']}/{typed['is_a']}",
+             class_target(ref), after=classes[ref])
 
     out["classes"] = list(classes.values())
     out["odrl_alignment"] = {

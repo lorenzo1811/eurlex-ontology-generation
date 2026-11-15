@@ -37,6 +37,8 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_generation.skip_footnote_chunks",
                     "params:ontology_generation.footnote_threshold",
                     "params:ontology_generation.cleanup_candidates",
+                    "params:ontology_generation.non_binding_note",
+                    "params:ontology_generation.rules_pass",
                 ],
                 outputs="ontology_candidates_batch",
                 name="generate_partial_ontologies_node",

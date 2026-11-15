@@ -9,7 +9,9 @@ import math
 import re
 from typing import Any
 
+from ...utils.deontic import covered, modal_sentences
 from ...utils.entity_linking import load_gazetteer
+from ...utils.eurlex_structure import NON_BINDING, section_of
 from ...utils.ontology_cleanup import action_ungrounded_reason, example_problem, party_far_from_action, rule_key
 from ...utils.ontology_normalize import type_entity
 from ...utils.vocabulary import OTHER_ACTION, load_vocabulary
@@ -47,9 +49,12 @@ ODRL_CODES = {
     "gazetteer_type_mismatch",
     "rule_slot_type",
     "rights_model_empty",
+    "modal_without_rule",
     "placeholder_party",
     "undefined_entities",
 }
+# Uncovered deontic sentences reported per chunk (one finding each).
+MAX_MODAL_FINDINGS = 8
 
 # Severity 'info' findings are reported (and feed the metrics) but never
 # affect scores or approval: they describe vocabulary drift that the
@@ -247,14 +252,32 @@ def run_deterministic_checks(
             if isinstance(values, list):
                 defined.update(v for v in values if isinstance(v, str))
 
-    # 1. Empty rights model
-    if not list(_iter_rules(onto)):
+    # 1. Rules the text states but the ontology misses (utils/deontic.py).
+    #    Recitals and the preamble do not bind: an empty rights model is right there.
+    section = section_of(text)
+    rules = [r for _, r in _iter_rules(onto)]
+    modal = modal_sentences(text) if section not in NON_BINDING else []
+    missing = [s for s in modal if not covered(s, rules)]
+    if not rules and section not in NON_BINDING:
         findings.append(
             _finding(
                 "rights_model_empty",
-                "warning",
-                "rights_model contains no permissions, prohibitions or duties.",
+                "warning" if modal else "info",
+                "rights_model contains no permissions, prohibitions or duties"
+                + (f", but the text has {len(modal)} sentence(s) stating one." if modal else "."),
                 "Add the permissions, prohibitions or duties expressed in the text to rights_model.",
+            )
+        )
+    for s in missing[:MAX_MODAL_FINDINGS]:
+        singular = s["kind"][:-1] if s["kind"] != "duties" else "duty"
+        findings.append(
+            _finding(
+                "modal_without_rule",
+                "warning",
+                f"The text states a {singular} ('{s['cue']}') that no rule covers: \"{s['sentence'][:300]}\"",
+                f"Add to {s['kind']} the rule stated by: \"{s['sentence'][:300]}\"",
+                data={"rule_kind": s["kind"], "cue": s["cue"], "sentence": s["sentence"],
+                      "chunk_start": s["start"], "chunk_end": s["end"]},
             )
         )
 

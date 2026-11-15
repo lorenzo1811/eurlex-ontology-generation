@@ -1,10 +1,17 @@
-# This is a boilerplate parameters config generated for pipeline 'eurlex_chunking'
-# using Kedro 1.4.0.
-#
-# Documentation for this file format can be found in "Parameters"
-# Link: https://docs.kedro.org/en/1.4.0/configuration/parameters.html
+# Parameters for the 'eurlex_chunking' pipeline (Kedro 1.4.0).
+# Documentation: https://docs.kedro.org/en/1.4.0/configuration/parameters.html
 
 eurlex_chunking:
   text_column: act_raw_text
-  chunk_size: 2000
-  chunk_overlap: 200
+
+  # structural: follow the act's structure (preamble, recitals, articles and
+  #   paragraphs, annexes), drop footnotes and signatures, never cut a word,
+  #   never mix recitals and articles in one chunk (utils/eurlex_structure.py).
+  # window: legacy fixed-size windows (cut at word boundaries); uses chunk_overlap.
+  strategy: structural
+
+  chunk_size: 2000       # max characters of the chunk body (the header line is extra)
+  chunk_overlap: 200     # window strategy only
+
+  include_preamble: true  # title + citations ("Having regard to ...")
+  include_annexes: true   # annexes are ~1/3 of the corpus text, often tables

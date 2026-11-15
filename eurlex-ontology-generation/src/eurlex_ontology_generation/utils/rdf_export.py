@@ -21,6 +21,14 @@ Rules
 Relationships
   eo:<relation> object-property assertions. When an endpoint is a class this
   relies on OWL 2 punning (allowed in OWL 2 DL).
+Provenance
+  Every class, individual, rule and constraint links with prov:wasDerivedFrom
+  to eo:TextEvidence nodes (ev: namespace), one per quoted span: dct:source is
+  the CELEX resource of the act, eo:chunkId / eo:section / eo:article /
+  eo:paragraph / eo:recital locate it, and W3C Web Annotation selectors hold the
+  quote (oa:TextQuoteSelector) and the character offsets in the act text of the
+  project corpus (oa:TextPositionSelector). eo:extractionMatch tells how the
+  span was found (exact, normalized, fuzzy, inferred; see utils/provenance.py).
 
 Every entity also carries eo:entityKind ("class"/"individual") and eo:coreType
 literals, which the SHACL shapes use as targets.
@@ -38,6 +46,9 @@ from .vocabulary import Vocabulary, load_vocabulary, parse_date
 
 ODRL = Namespace("http://www.w3.org/ns/odrl/2/")
 WD = Namespace("http://www.wikidata.org/entity/")
+PROV = Namespace("http://www.w3.org/ns/prov#")
+OA = Namespace("http://www.w3.org/ns/oa#")
+CELLAR_CELEX = "http://publications.europa.eu/resource/celex/"
 EU_CURRENCY = Namespace("http://publications.europa.eu/resource/authority/currency/")
 DEFAULT_BASE_IRI = "https://w3id.org/eurlex-odrl/"
 ONTOLOGY_VERSION = "0.1.0"
@@ -58,7 +69,46 @@ RULE_LINK = {"permissions": ODRL.permission, "prohibitions": ODRL.prohibition, "
 def namespaces(base_iri: str = DEFAULT_BASE_IRI) -> dict[str, Namespace]:
     base = base_iri if base_iri.endswith(("/", "#")) else base_iri + "/"
     return {"eo": Namespace(base + "ontology#"), "ent": Namespace(base + "entity/"),
-            "act": Namespace(base + "action/"), "pol": Namespace(base + "policy/")}
+            "act": Namespace(base + "action/"), "pol": Namespace(base + "policy/"),
+            "ev": Namespace(base + "evidence/")}
+
+
+def add_evidence(g: Graph, ns: dict, node, items: Any) -> int:
+    """prov:wasDerivedFrom links from `node` to one eo:TextEvidence per item."""
+    eo, ev = ns["eo"], ns["ev"]
+    n = 0
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict) or not item.get("quote"):
+            continue
+        key = "|".join(str(item.get(k) or "") for k in ("celex", "chunk_id", "start", "end", "quote"))
+        e = ev[hashlib.sha1(key.encode()).hexdigest()[:16]]
+        g.add((node, PROV.wasDerivedFrom, e))
+        n += 1
+        if (e, RDF.type, eo.TextEvidence) in g:
+            continue
+        g.add((e, RDF.type, eo.TextEvidence))
+        g.add((e, RDF.type, PROV.Entity))
+        if item.get("celex"):
+            g.add((e, DCTERMS.source, URIRef(CELLAR_CELEX + str(item["celex"]))))
+            g.add((e, eo.celex, Literal(str(item["celex"]))))
+        for key_, prop in (("chunk_id", eo.chunkId), ("section", eo.section), ("article", eo.article),
+                           ("match", eo.extractionMatch)):
+            if item.get(key_) is not None:
+                g.add((e, prop, Literal(str(item[key_]))))
+        for key_, prop in (("paragraph", eo.paragraph), ("recital", eo.recital)):
+            if isinstance(item.get(key_), int):
+                g.add((e, prop, Literal(item[key_], datatype=XSD.integer)))
+        quote = BNode()
+        g.add((e, OA.hasSelector, quote))
+        g.add((quote, RDF.type, OA.TextQuoteSelector))
+        g.add((quote, OA.exact, Literal(str(item["quote"]))))
+        if isinstance(item.get("start"), int) and isinstance(item.get("end"), int):
+            pos = BNode()
+            g.add((e, OA.hasSelector, pos))
+            g.add((pos, RDF.type, OA.TextPositionSelector))
+            g.add((pos, OA.start, Literal(item["start"], datatype=XSD.nonNegativeInteger)))
+            g.add((pos, OA.end, Literal(item["end"], datatype=XSD.nonNegativeInteger)))
+    return n
 
 
 def local_name(name: str) -> str:
@@ -124,8 +174,13 @@ def build_tbox(g: Graph, ns: dict, vocab: Vocabulary) -> None:
 
     for p in ("entityKind", "coreType", "supportChunks", "supportDocuments", "supportApprovedChunks",
               "typeSource", "kindConfidence", "actionObject", "actionLabel", "provision",
-              "mergedFrom", "upperClass", "coreClass", "status", "celex", "actType", "year"):
+              "mergedFrom", "upperClass", "coreClass", "status", "celex", "actType", "year",
+              "chunkId", "section", "article", "paragraph", "recital", "extractionMatch"):
         g.add((eo[p], RDF.type, OWL.AnnotationProperty))
+    g.add((eo.TextEvidence, RDF.type, OWL.Class))
+    g.add((eo.TextEvidence, RDFS.label, Literal("Text evidence", lang="en")))
+    g.add((eo.TextEvidence, RDFS.comment, Literal(
+        "A quoted span of a source act that an extracted element rests on.", lang="en")))
     g.add((eo.relatedIndividual, RDF.type, OWL.ObjectProperty))
     g.add((eo.memberState, RDF.type, OWL.DatatypeProperty))
 
@@ -177,12 +232,19 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
     ns = namespaces(base_iri)
     eo, ent, act, pol = ns["eo"], ns["ent"], ns["act"], ns["pol"]
     g = Graph()
-    for prefix, n in (("eo", eo), ("ent", ent), ("act", act), ("pol", pol), ("odrl", ODRL),
-                      ("owl", OWL), ("skos", SKOS), ("wd", WD), ("dct", DCTERMS)):
+    for prefix, n in (("eo", eo), ("ent", ent), ("act", act), ("pol", pol), ("ev", ns["ev"]),
+                      ("odrl", ODRL), ("owl", OWL), ("skos", SKOS), ("wd", WD), ("dct", DCTERMS),
+                      ("prov", PROV), ("oa", OA)):
         g.bind(prefix, n)
     build_tbox(g, ns, vocab)
     stats = {"classes": 0, "accepted_classes": 0, "candidate_classes": 0, "individuals": 0, "rules": 0,
-             "relationships": 0, "constraints": 0, "policies": 0, "skipped": []}
+             "relationships": 0, "constraints": 0, "policies": 0, "evidence_links": 0,
+             "elements_without_evidence": 0, "skipped": []}
+
+    def evidence(node, obj: dict) -> None:
+        n = add_evidence(g, ns, node, obj.get("provenance"))
+        stats["evidence_links"] += n
+        stats["elements_without_evidence"] += n == 0
     EO = eo
 
     iri_of: dict[str, URIRef] = {}
@@ -213,6 +275,7 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
             g.add((node, eo.kindConfidence, Literal(str(e["kind_confidence"]))))
         for variant in e.get("merged_from") or []:
             g.add((node, eo.mergedFrom, Literal(variant)))
+        evidence(node, e)
 
     for c in refined.get("classes", []):
         node = entity_iri(c["name"])
@@ -220,6 +283,12 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
         if c.get("is_a") in vocab.upper:
             g.add((node, RDFS.subClassOf, eo[c["is_a"]]))
         describe(node, c, "class")
+        # a class is not the same thing as a Wikidata item / authority concept:
+        # skos:exactMatch (mapping), not owl:sameAs (identity, used for individuals)
+        if c.get("wikidata"):
+            g.add((node, SKOS.exactMatch, WD[c["wikidata"]]))
+        if c.get("iri"):
+            g.add((node, SKOS.exactMatch, URIRef(c["iri"])))
         status = c.get("status") or "accepted"
         g.add((node, eo.status, Literal(status)))
         stats["classes"] += 1
@@ -317,6 +386,7 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
                 if r.get(key):
                     g.add((node, prop, Literal(str(r[key]))))
             _support(g, eo, node, r.get("support"))
+            evidence(node, r)
             for c in r.get("constraints") or []:
                 left = c.get("left_operand")
                 if not left:
@@ -336,6 +406,7 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
                 unit = c.get("unit")
                 if unit and re.fullmatch(r"[A-Z]{3}", unit):
                     g.add((cn, ODRL.unit, EU_CURRENCY[unit]))
+                stats["evidence_links"] += add_evidence(g, ns, cn, c.get("provenance"))
                 stats["constraints"] += 1
             stats["rules"] += 1
     stats["triples"] = len(g)

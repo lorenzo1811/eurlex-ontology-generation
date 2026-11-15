@@ -7,6 +7,9 @@
 @prefix odrl: <http://www.w3.org/ns/odrl/2/> .
 @prefix eo:   <https://w3id.org/eurlex-odrl/ontology#> .
 @prefix eosh: <https://w3id.org/eurlex-odrl/shapes#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix oa:   <http://www.w3.org/ns/oa#> .
+@prefix dct:  <http://purl.org/dc/terms/> .
 
 # SHACL shapes for the exported EurLex ODRL ontology.
 #
@@ -24,7 +27,9 @@ eosh: sh:declare [
   [ sh:prefix "owl" ; sh:namespace "http://www.w3.org/2002/07/owl#"^^xsd:anyURI ] ,
   [ sh:prefix "rdfs" ; sh:namespace "http://www.w3.org/2000/01/rdf-schema#"^^xsd:anyURI ] ,
   [ sh:prefix "rdf" ; sh:namespace "http://www.w3.org/1999/02/22-rdf-syntax-ns#"^^xsd:anyURI ] ,
-  [ sh:prefix "skos" ; sh:namespace "http://www.w3.org/2004/02/skos/core#"^^xsd:anyURI ] .
+  [ sh:prefix "skos" ; sh:namespace "http://www.w3.org/2004/02/skos/core#"^^xsd:anyURI ] ,
+  [ sh:prefix "prov" ; sh:namespace "http://www.w3.org/ns/prov#"^^xsd:anyURI ] ,
+  [ sh:prefix "oa" ; sh:namespace "http://www.w3.org/ns/oa#"^^xsd:anyURI ] .
 
 # ---------------------------------------------------------------- entities
 eosh:EntityShape
@@ -268,6 +273,32 @@ eosh:RelationshipEndpointShape
       }""" ] .
 
 # ---------------------------------------------------------------- provenance and promotion
+# Traceability: every entity and rule should rest on a quoted span of a source act
+# (prov:wasDerivedFrom -> eo:TextEvidence with oa:TextQuoteSelector).
+eosh:EvidenceShape
+  a sh:NodeShape ;
+  sh:targetSubjectsOf eo:entityKind ;
+  sh:targetClass odrl:Permission , odrl:Prohibition , odrl:Duty ;
+  sh:severity sh:Warning ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "No text evidence: the element has no prov:wasDerivedFrom quoted span." ;
+    sh:prefixes eosh: ;
+    sh:select """
+      SELECT $this WHERE {
+        FILTER NOT EXISTS { $this prov:wasDerivedFrom ?ev . ?ev oa:hasSelector ?sel }
+      }""" ] .
+
+eosh:TextEvidenceShape
+  a sh:NodeShape ;
+  sh:targetClass eo:TextEvidence ;
+  sh:property [
+    sh:path dct:source ; sh:minCount 1 ; sh:nodeKind sh:IRI ;
+    sh:message "Text evidence needs dct:source (the CELEX resource of the act)." ] ;
+  sh:property [
+    sh:path oa:hasSelector ; sh:minCount 1 ;
+    sh:message "Text evidence needs an oa:TextQuoteSelector." ] .
+
 eosh:CandidateClassShape
   a sh:NodeShape ;
   sh:targetSubjectsOf eo:status ;

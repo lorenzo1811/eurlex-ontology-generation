@@ -15,13 +15,17 @@ of reading the text:
 It also tells when a chunk is only a list of footnotes ("(7) Council Regulation ... (OJ L ...)"),
 which has no rights to extract, and when a list reached its schema cap.
 
-Every change is returned as {"code", "detail"} so it can be stored with the chunk.
+Every change is returned as a change event (utils/changelog.py: code, detail,
+actor, target, before, after) so it can be stored with the chunk.
 """
 from __future__ import annotations
 
 import copy
 import json
 import re
+
+from .changelog import change, rule_target          # dependency-free too
+from .eurlex_structure import PROVISION_OF_SECTION, section_of
 
 RULE_KINDS = ("permissions", "prohibitions", "duties")
 
@@ -134,11 +138,11 @@ def warn_lists_at_cap(onto: dict, caps: dict, notes: list) -> None:
     for k in RULE_KINDS:
         n = len(rm.get(k) or [])
         if k in caps and n >= caps[k]:
-            notes.append({"code": "list_at_cap", "detail": f"rights_model.{k}={n}"})
+            notes.append(change("list_at_cap", f"rights_model.{k}={n}", target=f"rights_model.{k}"))
     for k in ("classes", "example_instances", "legal_patterns", "relationships"):
         n = len(onto.get(k) or [])
         if k in caps and n >= caps[k]:
-            notes.append({"code": "list_at_cap", "detail": f"{k}={n}"})
+            notes.append(change("list_at_cap", f"{k}={n}", target=k))
 
 
 def drop_duplicate_rules(onto: dict, notes: list) -> None:
@@ -151,22 +155,21 @@ def drop_duplicate_rules(onto: dict, notes: list) -> None:
         for r in rm.get(k) or []:
             key = _rule_key(r)
             if key in seen:
-                notes.append({"code": "rule_duplicate_dropped", "detail": f"{k}:{_rule_label(r)}"})
+                notes.append(change("rule_duplicate_dropped", f"{k}:{_rule_label(r)}",
+                                    target=rule_target(k, r), before=r))
                 continue
             seen.add(key)
             kept.append(r)
         if k in rm:
             rm[k] = kept
-    # the same fact as permission and as duty: the duty ("shall") wins
+    # The same fact as permission and as duty is a conflict to review, not a
+    # duplicate: "may" and "shall" can both hold (e.g. "may ... and shall then
+    # ..."), so both rules are kept and the conflict is recorded.
     duties = {(_rule_label(r), r.get("party"), r.get("asset")) for r in rm.get("duties") or []}
-    if duties and rm.get("permissions"):
-        kept = []
-        for r in rm["permissions"]:
-            if (_rule_label(r), r.get("party"), r.get("asset")) in duties:
-                notes.append({"code": "permission_duplicates_duty", "detail": _rule_label(r)})
-                continue
-            kept.append(r)
-        rm["permissions"] = kept
+    for r in rm.get("permissions") or []:
+        if (_rule_label(r), r.get("party"), r.get("asset")) in duties:
+            notes.append(change("permission_duty_conflict", _rule_label(r),
+                                target=rule_target("permissions", r)))
 
 
 def drop_ungrounded_actions(onto: dict, text: str, notes: list) -> None:
@@ -178,7 +181,8 @@ def drop_ungrounded_actions(onto: dict, text: str, notes: list) -> None:
         for r in rm.get(k) or []:
             why = action_ungrounded_reason(r, text)
             if why:
-                notes.append({"code": "rule_ungrounded_dropped", "detail": f"{k}:{_rule_label(r)} ({why})"})
+                notes.append(change("rule_ungrounded_dropped", f"{k}:{_rule_label(r)} ({why})",
+                                    target=rule_target(k, r), before=r))
                 continue
             kept.append(r)
         if k in rm:
@@ -211,13 +215,15 @@ def fix_examples(onto: dict, text: str, notes: list, max_context: int = 600) -> 
             continue
         problem = example_problem(e, text)
         if problem == "value_not_in_text":
-            notes.append({"code": "example_dropped", "detail": f"{e.get('entity')}: value not in text"})
+            notes.append(change("example_dropped", f"{e.get('entity')}: value not in text",
+                                target=f"example_instances[{e.get('entity')}]", before=e))
             continue
         if problem in ("placeholder", "context_not_in_text", "context_without_value"):
             value = _norm(e.get("example_value"))
             hits = [s for s in sentences if value in _norm(s)]
             if not hits:
-                notes.append({"code": "example_dropped", "detail": f"{e.get('entity')}: {problem}"})
+                notes.append(change("example_dropped", f"{e.get('entity')}: {problem}",
+                                    target=f"example_instances[{e.get('entity')}]", before=e))
                 continue
             hit = min(hits, key=len)
             if len(hit) > max_context:
@@ -226,8 +232,10 @@ def fix_examples(onto: dict, text: str, notes: list, max_context: int = 600) -> 
                 if at > 0:                      # start and end on whole words
                     window = window.split(" ", 1)[-1]
                 hit = window.rsplit(" ", 1)[0]
+            notes.append(change("example_context_repaired", f"{e.get('entity')}: {problem}",
+                                target=f"example_instances[{e.get('entity')}].source_context",
+                                before=e.get("source_context"), after=hit))
             e = {**e, "source_context": hit}
-            notes.append({"code": "example_context_repaired", "detail": f"{e.get('entity')}"})
         kept.append(e)
     onto["example_instances"] = kept
 
@@ -262,7 +270,8 @@ def trim_descriptions(onto: dict, notes: list, cap: int = 300) -> None:
         new = trim_description(old, cap)
         if new != old:
             if re.sub(r"\s+", " ", old).strip() != new:    # more than a whitespace clean-up
-                notes.append({"code": "description_trimmed", "detail": label})
+                notes.append(change("description_trimmed", label, target=f"{label}.description",
+                                    before=old, after=new))
             obj["description"] = new
 
     fix(onto, "ontology")
@@ -291,10 +300,12 @@ def fill_provision(onto: dict, original: dict | None, notes: list, default: str 
             p = known.get((_rule_label(r), r.get("party"), r.get("asset")))
             if p:
                 r["provision"] = p
-                notes.append({"code": "provision_restored", "detail": _rule_label(r)})
+                notes.append(change("provision_restored", _rule_label(r),
+                                    target=rule_target(k, r) + ".provision", after=p))
             elif default:
                 r["provision"] = default
-                notes.append({"code": "provision_defaulted", "detail": _rule_label(r)})
+                notes.append(change("provision_defaulted", f"{_rule_label(r)}: no provision, schema default",
+                                    target=rule_target(k, r) + ".provision", after=default))
 
 
 # ------------------------------------------------- provision: recital or article?
@@ -316,7 +327,13 @@ def _region(text: str, pos: int) -> str | None:
 
 def provision_evidence(rule: dict, text: str) -> str | None:
     """'recital' / 'article' when the places where the rule's verb occurs in the text say so,
-    otherwise None. An occurrence in an article wins (a rule is kept when in doubt)."""
+    otherwise None. An occurrence in an article wins (a rule is kept when in doubt).
+
+    Structural chunks ('§ Article 3' header, utils/eurlex_structure.py) hold one
+    section only, so the header decides; the regex heuristic is for legacy chunks."""
+    section = section_of(text)
+    if section in PROVISION_OF_SECTION:
+        return PROVISION_OF_SECTION[section]
     words = [w for w in _rule_label(rule).lower().split("_") if w]
     if not words or len(words[0]) < 3 or not text:
         return None
@@ -339,11 +356,14 @@ def apply_provision_evidence(onto: dict, text: str, notes: list, drop_recital: b
         for r in rm.get(k) or []:
             ev = provision_evidence(r, text)
             if ev and r.get("provision") != ev:
-                notes.append({"code": "provision_corrected",
-                              "detail": f"{_rule_label(r)}: {r.get('provision')} -> {ev}"})
+                notes.append(change("provision_corrected",
+                                    f"{_rule_label(r)}: {r.get('provision')} -> {ev}",
+                                    target=rule_target(k, r) + ".provision",
+                                    before=r.get("provision"), after=ev))
                 r["provision"] = ev
             if drop_recital and ev == "recital" and k in ("duties", "prohibitions"):
-                notes.append({"code": "rule_from_recital_dropped", "detail": f"{k}:{_rule_label(r)}"})
+                notes.append(change("rule_from_recital_dropped", f"{k}:{_rule_label(r)}",
+                                    target=rule_target(k, r), before=r))
                 continue
             kept.append(r)
         rm[k] = kept

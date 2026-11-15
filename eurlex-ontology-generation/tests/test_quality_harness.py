@@ -381,5 +381,21 @@ def test_rereview_reads_revisions_and_records_round(tmp_path, monkeypatch):
     reviews_dir = tmp_path / "reviews"
     review_nodes.persist_ontology_reviews(out.assign(approved=False), 0, 1000, str(reviews_dir))
     review_nodes.persist_ontology_reviews(out.assign(round=2, approved=True), 0, 1000, str(reviews_dir))
-    latest = load_ontology_reviews(0, 1000, str(reviews_dir))
+    # the revision of round N reads exactly the review of round N-1, never "the latest"
+    latest = load_ontology_reviews(0, 1000, str(reviews_dir), review_round=2)
     assert len(latest) == 1 and int(latest.iloc[0]["round"]) == 2
+
+
+# ------------------------------------------------------------ cleanup
+def test_permission_matching_a_duty_is_kept_and_flagged():
+    from eurlex_ontology_generation.utils.ontology_cleanup import drop_duplicate_rules
+
+    rule = {"action": "submit", "action_label": "submit report", "party": "Commission",
+            "asset": "AnnualReport", "constraints": []}
+    onto = {"rights_model": {"permissions": [dict(rule)], "prohibitions": [],
+                             "duties": [dict(rule, constraints=[{"left_operand": "dateTime"}])]}}
+    notes: list = []
+    drop_duplicate_rules(onto, notes)
+    assert len(onto["rights_model"]["permissions"]) == 1
+    assert len(onto["rights_model"]["duties"]) == 1
+    assert [n["code"] for n in notes] == ["permission_duty_conflict"]

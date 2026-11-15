@@ -24,6 +24,11 @@ Quote = Annotated[str, StringConstraints(max_length=600)]   # sentence copied fr
 Unit = Annotated[str, StringConstraints(max_length=30)]
 
 
+# Verbatim span the element rests on; code locates it in the chunk and turns it
+# into a `source` with act offsets (utils/provenance.py). Capped like a description.
+EVIDENCE_HELP = "The words of the fragment this comes from, copied verbatim (one sentence or less)."
+
+
 def _lit(values) -> object:
     return Literal[tuple(values)]  # type: ignore[valid-type]
 
@@ -57,6 +62,7 @@ def build_ontology_model(vocabulary_path: str | None = None) -> type[BaseModel]:
         is_a=(_lit(vocab.upper_names), Field(description="Upper-ontology parent.")),
         kind=(_lit(KINDS), Field(description="'individual' for one named thing (a country, an institution, a named fund); 'class' for a kind of thing.")),
         description=(Text, ...),
+        evidence=(Text, Field("", description=EVIDENCE_HELP)),
     )
     Relationship = create_model(
         "Relationship",
@@ -80,6 +86,7 @@ def build_ontology_model(vocabulary_path: str | None = None) -> type[BaseModel]:
         asset=(Name, Field("", description="Class or individual name the action applies to.")),
         provision=(_lit(PROVISIONS), Field("article", description="Where the rule is stated. Recitals are not binding.")),
         constraints=(list[Constraint], Field(default_factory=list, max_length=6)),
+        evidence=(Text, Field("", description=EVIDENCE_HELP)),
     )
     Rule = create_model("Rule", **rule_fields)
     RightsModel = create_model(
@@ -99,6 +106,12 @@ def build_ontology_model(vocabulary_path: str | None = None) -> type[BaseModel]:
         legal_patterns=(list[LegalPattern], Field(default_factory=list, max_length=10)),
         example_instances=(list[ExampleInstance], Field(default_factory=list, max_length=10)),
     )
+
+
+def build_rules_model(vocabulary_path: str | None = None) -> type[BaseModel]:
+    """Schema of the rules-only pass: just the rights model (permissions,
+    prohibitions, duties), same Rule fields as the full extraction."""
+    return build_ontology_model(vocabulary_path).model_fields["rights_model"].annotation
 
 
 EXPECTED_TOP_LEVEL_KEYS = [

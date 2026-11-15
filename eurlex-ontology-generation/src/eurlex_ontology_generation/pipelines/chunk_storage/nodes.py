@@ -57,7 +57,8 @@ def partition_chunks(
                 "start_row": start_row,
                 "end_row": end_row - 1,
                 "chunk_count": len(partition),
-                "file_path": str(file_path),
+                # forward slashes: the manifest is built on Windows and read on Linux (Colab)
+                "file_path": file_path.as_posix(),
             }
         )
 

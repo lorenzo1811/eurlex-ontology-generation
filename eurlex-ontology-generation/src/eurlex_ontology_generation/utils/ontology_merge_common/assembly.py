@@ -19,6 +19,7 @@ from eurlex_ontology_generation.utils.ontology_merge_common.entity_resolution im
     split_entities,
     group_key,
 )
+from eurlex_ontology_generation.utils.provenance import evidence_of, merge_evidence
 
 # Core entity types expected by the ontology model
 VALID_CORE_TYPES = {"Asset", "Party", "RightsHolder", "Permission", "Prohibition", "Duty", "Constraint"}
@@ -73,6 +74,9 @@ def _constraint_key(c: dict) -> tuple:
 # MAX_SOURCES (sorted) plus the true count in support.documents.
 _CELEX_RE = re.compile(r"^[0-9CE]\d{4}[A-Z]{1,2}\d+")
 MAX_SOURCES = 2000
+# Evidence items (CELEX, chunk, article/paragraph, act offsets, quote) kept per
+# class, rule and constraint; `sources` keeps the full list of acts.
+MAX_EVIDENCE = 10
 
 
 def _sources(obj: dict, celex: str) -> set[str]:
@@ -122,6 +126,7 @@ def assemble_merged_ontology(
     class_docs: dict[str, set] = defaultdict(set)
     class_docs_n: Counter = Counter()          # documents carried over from lower-level support
     class_sources: dict[str, set] = defaultdict(set)
+    class_prov: dict[str, list] = defaultdict(list)    # evidence items (utils/provenance.py)
     raw_class_names: set[str] = set()
     relationships: dict[tuple, dict] = {}
     rules: dict[str, dict[tuple, dict]] = {k: {} for k in RULE_KINDS}
@@ -189,6 +194,7 @@ def assemble_merged_ontology(
             if cls.get("iri"):
                 class_iri.setdefault(name, cls["iri"])
             class_approved[name] += _approved_support(cls, row_approved, chunks)
+            class_prov[name] = merge_evidence(class_prov[name], evidence_of(cls), MAX_EVIDENCE)
 
             # Merge class descriptions
             existing = classes.setdefault(name, {"description": ""})
@@ -248,11 +254,17 @@ def assemble_merged_ontology(
                         dropped["rule_unresolved_asset"] += 1
                         continue
                     if kind == "permissions" and not asset:
-                        dropped["permission_without_asset"] += 1
-                        continue
+                        # kept: odrl:target is optional; only counted for review
+                        dropped["permission_without_asset_kept"] += 1
 
-                    # Clean and collect constraints
-                    constraints = [c for c in (clean_constraint(c) for c in _dicts(rule.get("constraints"))) if c]
+                    # Clean and collect constraints, keeping where each one was read
+                    constraints = []
+                    for raw_c in _dicts(rule.get("constraints")):
+                        c = clean_constraint(raw_c)
+                        if c:
+                            c["provenance"] = evidence_of(raw_c)
+                            constraints.append(c)
+                    rule_prov = evidence_of(rule)
                     for party in parties:
                         key = (action, action_object, party, asset)
                         entry = rules[kind].setdefault(
@@ -266,13 +278,20 @@ def assemble_merged_ontology(
                         entry["approved_support"] += _approved_support(rule, row_approved, rule_chunks)
                         if rule.get("provision") and not entry.get("provision"):
                             entry["provision"] = rule["provision"]
+                        entry["provenance"] = merge_evidence(entry.get("provenance", []), rule_prov,
+                                                             MAX_EVIDENCE)
 
                         # Unique constraint aggregation per rule
-                        seen = {_constraint_key(c) for c in entry["constraints"]}
+                        by_key = {_constraint_key(c): c for c in entry["constraints"]}
                         for c in constraints:
-                            if _constraint_key(c) not in seen and len(entry["constraints"]) < MAX_CONSTRAINTS_PER_RULE:
+                            k = _constraint_key(c)
+                            if k in by_key:
+                                by_key[k]["provenance"] = merge_evidence(
+                                    by_key[k].get("provenance", []), c.get("provenance", []), MAX_EVIDENCE)
+                            elif len(entry["constraints"]) < MAX_CONSTRAINTS_PER_RULE:
+                                c = dict(c)
                                 entry["constraints"].append(c)
-                                seen.add(_constraint_key(c))
+                                by_key[k] = c
 
         # 1d: Process legal patterns
         for pat in _dicts(onto.get("legal_patterns")):
@@ -337,6 +356,8 @@ def assemble_merged_ontology(
             entry["kind"] = kind_votes[name].most_common(1)[0][0]
         if name in class_iri:
             entry["iri"] = class_iri[name]
+        if class_prov[name]:
+            entry["provenance"] = class_prov[name]
         final_classes.append(entry)
 
     # a name that is used as party/asset in the rights model but typed Legal_extension stays as is:
@@ -426,6 +447,8 @@ def _public(rule: dict, kind: str) -> dict:
         out["provision"] = rule["provision"]
     if rule.get("asset") or kind == "permissions":
         out["asset"] = rule.get("asset")
+    if rule.get("provenance"):
+        out["provenance"] = rule["provenance"]
     return out
 
 

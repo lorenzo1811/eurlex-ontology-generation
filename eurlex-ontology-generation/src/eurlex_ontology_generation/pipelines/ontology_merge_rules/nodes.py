@@ -228,6 +228,10 @@ def _apply_mapping_merge(ontology_a: dict, ontology_b: dict, mapping_result: dic
                 ontology_a.get("rights_model", {}).get("permissions", [])
                 + ontology_b.get("rights_model", {}).get("permissions", [])
             ),
+            "prohibitions": (
+                ontology_a.get("rights_model", {}).get("prohibitions", [])
+                + ontology_b.get("rights_model", {}).get("prohibitions", [])
+            ),
             "duties": (
                 ontology_a.get("rights_model", {}).get("duties", [])
                 + ontology_b.get("rights_model", {}).get("duties", [])

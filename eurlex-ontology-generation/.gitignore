@@ -29,6 +29,7 @@ data/**
 
 # ignore report file from the coding agent
 AGENTS.md
+CLAUDE.md
 
 # also keep all .gitkeep files
 !.gitkeep

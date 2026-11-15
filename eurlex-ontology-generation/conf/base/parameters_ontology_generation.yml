@@ -18,6 +18,39 @@ ontology_generation:
   skip_footnote_chunks: true   # chunks made only of footnotes "(7) ... (OJ L ...)" are not sent to the LLM
   footnote_threshold: 0.6      # share of the chunk covered by footnotes above which it is skipped
   cleanup_candidates: true     # drop duplicate/ungrounded rules, fix examples, trim descriptions
+  # Appended to the user prompt for structural chunks of recitals or the preamble
+  # (utils/eurlex_structure.py): they do not bind, so only concepts are extracted.
+  non_binding_note: >-
+    This fragment comes from the {section} of the act, which does not bind:
+    extract classes, relationships and examples, and leave permissions,
+    prohibitions and duties empty.
+
+  # Second, narrow LLM call on article chunks (pipelines/ontology_generation/rules_pass.py):
+  # the sentences that state a permission / prohibition / duty (found in code,
+  # utils/deontic.py) and that the first answer did not cover are listed with their
+  # list name; the model returns only the rights model (constrained to its schema).
+  # Placeholders: {text}, {sentences} and the vocabulary ones; literal braces doubled.
+  rules_pass:
+    enabled: true
+    sections: [article]      # structural section types the pass runs on
+    max_sentences: 12        # sentences sent per chunk
+    system_prompt: |
+      You extract ODRL rules from articles of EU legal acts. You receive an article and a numbered list of its sentences; each sentence is marked with the list it belongs to: [permissions] (a party MAY act), [prohibitions] (a party MUST NOT act) or [duties] (a party MUST act).
+      For each sentence, return the rule(s) it states in that list:
+      - party: who holds the permission, prohibition or duty, named as in the text, CamelCase or snake_case (e.g. Commission, Member_States). In a passive sentence ("the funds may be transferred"), the party is whoever acts if the text names it; otherwise skip the sentence.
+      - action: one canonical verb from: {actions} ("other" if none fits). action_label: the verb and its object with words of the sentence, snake_case (e.g. inform_european_parliament).
+      - asset: what the action applies to, named as in the text, or "".
+      - constraints: conditions stated in the sentence (dates, amounts, periods), left_operand from: {left_operands}; operator from: {operators}; right_operand copied from the text.
+      - evidence: the sentence copied verbatim.
+      Skip a sentence that names no party or no action. Never invent parties, dates or amounts. Each rule once.
+    user_prompt_template: |
+      Article:
+      {text}
+
+      Sentences that state a rule (list in brackets):
+      {sentences}
+
+      Return ONLY a JSON object {{"permissions": [...], "prohibitions": [...], "duties": [...]}}; each rule is {{"action", "action_label", "party", "assigner", "asset", "provision", "constraints", "evidence"}}.
 
   # Grammar-constrained decoding: pass the full JSON schema (built from
   # src/eurlex_ontology_generation/resources/vocabulary.yml) to Ollama's `format`
@@ -41,10 +74,12 @@ ontology_generation:
 
     Your task is to analyze legal text fragments from EUR-Lex and extract a machine-readable ontology aligned with ODRL.
 
-    ODRL RULES (rights_model):
-    - permissions: actions a party MAY perform.
-    - prohibitions: actions a party MUST NOT perform.
-    - duties: actions a party MUST perform.
+    ODRL RULES (rights_model). Read every sentence of an article and file it by its verb:
+    - permissions: actions a party MAY perform ("may", "is entitled to", "is authorised to").
+    - prohibitions: actions a party MUST NOT perform ("shall not", "may not", "must not", "is prohibited").
+    - duties: actions a party MUST perform ("shall", "must", "is required to").
+    "shall not" is a prohibition, never a duty. One sentence can state several rules (e.g. "X shall inform Y and may suspend Z": a duty and a permission).
+    Sentences about entry into force, the date of application or the addressees are not rules.
     Each rule has an action, a party (who holds the permission/prohibition/duty), optionally an assigner (who grants or imposes it), an asset (what the action applies to) and constraints.
     Permission, Prohibition, Duty, Constraint, Policy, Assignee and Target are ODRL structure: NEVER create classes with these words in their name (no "AuditDuty", no "AccessPermissionTarget"). Express them as rules instead.
 
@@ -63,6 +98,8 @@ ontology_generation:
 
     RELATIONSHIPS. "relation" is one of: {relations}. Use the active direction (A funds B, not B funded_by A).
 
+    SECTION. The fragment starts with a line "§ <section>" naming the part of the act it comes from: Preamble, Recitals (n)-(m), Article N(p), Annex. Set provision accordingly: article for Article, recital for Recitals, annex for Annex, other for Preamble.
+
     RECITALS. Numbered paragraphs after "Whereas:" are recitals: they explain, they do not bind. Do NOT extract duties or prohibitions from recitals. If you extract a rule from a recital, set provision to "recital".
 
     GROUNDING.
@@ -70,6 +107,7 @@ ontology_generation:
     2. Do not invent facts, parties, dates, amounts or currencies not present in the text.
     3. Example instances must quote the text exactly: example_value and source_context are copied verbatim from the fragment. If you are not sure, omit the example.
     4. action_label: every word of it (e.g. provide_financial_contribution) must be a word of the fragment or a plain inflection of one.
+    5. evidence: for every class and every rule, copy verbatim the words of the fragment it comes from (at most one sentence). Do not paraphrase; it is checked against the text.
 
     EMPTY RESULTS ARE VALID.
     - Many fragments contain no rule at all (definitions, citations, footnotes, lists of references, recitals). For those return empty permissions, prohibitions and duties.
@@ -92,17 +130,23 @@ ontology_generation:
         "extensions": ["<each Legal_extension class name>"]
       }},
       "classes": [
-        {{"name": "<Name_from_the_text>", "type": "<Party|Asset|Legal_extension>", "is_a": "<parent from the upper ontology>", "kind": "<individual|class>", "description": "<one sentence from the text>"}}
+        {{"name": "<Name_from_the_text>", "type": "<Party|Asset|Legal_extension>", "is_a": "<parent from the upper ontology>", "kind": "<individual|class>", "description": "<one sentence from the text>", "evidence": "<words of the text naming it, copied verbatim>"}}
       ],
       "relationships": [
         {{"source": "<ClassA>", "relation": "<relation from the list>", "target": "<ClassB>", "description": "<short>"}}
       ],
       "rights_model": {{
-        "permissions": [],
-        "prohibitions": [],
+        "permissions": [
+          {{"action": "<canonical action>", "action_label": "<verb_object_after_MAY>", "party": "<ClassName of who MAY act>", "assigner": "", "asset": "<ClassName>", "provision": "<article|recital|annex>",
+            "constraints": [], "evidence": "<the sentence with 'may', copied verbatim>"}}
+        ],
+        "prohibitions": [
+          {{"action": "<canonical action>", "action_label": "<verb_object_after_SHALL_NOT>", "party": "<ClassName of who MUST NOT act>", "assigner": "", "asset": "<ClassName>", "provision": "<article|annex>",
+            "constraints": [], "evidence": "<the sentence with 'shall not', copied verbatim>"}}
+        ],
         "duties": [
-          {{"action": "<canonical action>", "action_label": "<verb_object_from_the_text>", "party": "<ClassName>", "assigner": "", "asset": "<ClassName>", "provision": "<article|recital>",
-            "constraints": []}}
+          {{"action": "<canonical action>", "action_label": "<verb_object_after_SHALL>", "party": "<ClassName of who MUST act>", "assigner": "", "asset": "<ClassName>", "provision": "<article|annex>",
+            "constraints": [], "evidence": "<the sentence with 'shall', copied verbatim>"}}
         ]
       }},
       "legal_patterns": [

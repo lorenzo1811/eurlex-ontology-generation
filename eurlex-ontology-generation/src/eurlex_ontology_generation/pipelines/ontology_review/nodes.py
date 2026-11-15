@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ...utils.llm_client import llm_chat, run_parallel
 from ...utils.persist import append_dedup_csv
+from ...utils.provenance import strip_provenance
 from .ontology_checks import (
     compute_scores,
     count_warnings,
@@ -362,6 +363,7 @@ def review_ontologies(
 
     # Helper closure to evaluate deterministic checks and LLM judge for a single candidate
     def _review_row(row) -> dict:
+        segments = row.get("segments") if isinstance(row.get("segments"), str) else None
         if source_chunks is None:
             chunk_text = "" if pd.isna(row.get("text")) else str(row["text"])
         else:
@@ -369,7 +371,9 @@ def review_ontologies(
             if matching_chunks.empty:
                 raise ValueError(f"Source chunk not found for chunk_id {row['chunk_id']}.")
             chunk = matching_chunks.iloc[0]
-            chunk_text = "" if pd.isna(chunk["chunk_text"]) else str(chunk["chunk_text"])
+            chunk_text = "" if pd.isna(chunk["chunk_text"]) else str(chunk["chunk_text"]).replace("\r\n", "\n")
+            if segments is None and isinstance(chunk.get("segments"), str):
+                segments = chunk["segments"]
         ontology_json = row["ontology"]
 
         # Run deterministic rule checks on candidate JSON
@@ -394,7 +398,7 @@ def review_ontologies(
             # Format user prompt for judge
             user_prompt = user_prompt_template.format(
                 text=chunk_text,
-                ontology=ontology_json,
+                ontology=strip_provenance(ontology_json),   # `source` dicts only cost context
                 automatic_checks=format_findings(findings),
             )
             # Invoke LLM judge
@@ -442,6 +446,7 @@ def review_ontologies(
             "automatic_checks": json.dumps(findings, ensure_ascii=False),
             "approved": approved,
             "revision_required": revision_required,
+            "segments": segments,      # chunk -> act offsets, for the provenance of revisions
         }
 
     rows = [row for _, row in ontology_candidates.iterrows()]

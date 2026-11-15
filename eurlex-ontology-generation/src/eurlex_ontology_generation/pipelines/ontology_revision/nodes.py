@@ -4,10 +4,12 @@ import re
 from pathlib import Path
 import pandas as pd
 
+from ...utils.changelog import change, diff_ontologies, stamp
 from ...utils.llm_client import llm_chat, run_parallel
 from ...utils.ontology_normalize import normalize_chunk_ontology
 from ...utils.ontology_schema import build_ontology_model
 from ...utils.persist import append_dedup_csv
+from ...utils.provenance import attach_provenance, strip_provenance
 from ...utils.vocabulary import load_vocabulary, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -147,28 +149,43 @@ def revise_ontologies(
 
     # Helper closure to process and revise a single ontology row
     def _revise_row(row) -> dict:
+        segments_json = row.get("segments") if isinstance(row.get("segments"), str) else None
         base = {
             "batch_id": batch_id,
             "chunk_id": row["chunk_id"],
             "round": revision_round,
             "CELEX": row["CELEX"],
             "text": row["text"],
+            "segments": segments_json,
         }
+
+        def with_provenance(ontology: dict, events: list) -> str:
+            """Locate the sources again (the revision may have moved or added elements)
+            and store every event of this row, stamped with stage and round."""
+            if isinstance(ontology, dict):
+                events += attach_provenance(
+                    ontology, row["text"], celex=row["CELEX"], chunk_id=row["chunk_id"],
+                    segments=json.loads(segments_json) if segments_json else None)
+            return json.dumps(stamp(events, stage="revision", round=revision_round,
+                                    chunk_id=row["chunk_id"], celex=row["CELEX"]),
+                              ensure_ascii=False)
 
         if not row["revision_required"]:
             try:
                 kept, changes = _normalize(json.loads(row["ontology"]), row["text"])
-                ontology = json.dumps(kept, ensure_ascii=False)
             except (TypeError, json.JSONDecodeError):
-                ontology, changes = row["ontology"], []
+                kept, changes = None, []
+            change_log = with_provenance(kept, list(changes))
+            ontology = json.dumps(kept, ensure_ascii=False) if kept is not None else row["ontology"]
             return {**base, "ontology": ontology, "revised": False,
                     "revision_status": "skipped_not_required",
                     "approved_in_round": int(row.get("round", 0) or 0),
-                    "normalization_changes": json.dumps(changes, ensure_ascii=False)}
+                    "normalization_changes": json.dumps(changes, ensure_ascii=False),
+                    "change_log": change_log}
 
         user_prompt = render_prompt(
             user_prompt_template, vocabulary_path,
-            ontology=row["ontology"], text=row["text"], review=row["review"],
+            ontology=strip_provenance(row["ontology"]), text=row["text"], review=row["review"],
         )
 
         revised_ontology_json, used_fallback, response = None, True, None
@@ -199,23 +216,39 @@ def revise_ontologies(
             # temperature (chunks 14/15 of batch 46 failed 3/3): retrying only burns minutes.
             if response.done_reason == "length":
                 break
+        reviewed = _safe_load(row["ontology"])
+        events: list = []
         if used_fallback:
             revised_ontology_json = _build_fallback_json(row["ontology"])
+            events.append(change("revision_failed_original_kept", str(response.done_reason),
+                                 actor="llm_reviser", target="ontology"))
         done_reason = response.done_reason
 
+        extra_keys = sorted(set(revised_ontology_json) - set(expected_ontology_keys))
         revised_ontology_json, had_extra_keys = _strip_unexpected_keys(
             revised_ontology_json, expected_ontology_keys
         )
+        if had_extra_keys:
+            events.append(change("extra_keys_stripped", "top-level keys outside the schema",
+                                 target="ontology", before=extra_keys))
+        before_sync = list((revised_ontology_json.get("odrl_alignment") or {}).get("extensions") or [])
         revised_ontology_json = _sync_extensions_with_classes(revised_ontology_json)
+        after_sync = revised_ontology_json.get("odrl_alignment", {}).get("extensions")
+        if sorted(before_sync) != after_sync:
+            events.append(change("extensions_synced", "rebuilt from the Legal_extension classes",
+                                 target="odrl_alignment.extensions", before=before_sync, after=after_sync))
+        # what the LLM changed with respect to the reviewed ontology, element by element
+        if not used_fallback:
+            events = diff_ontologies(reviewed, revised_ontology_json, actor="llm_reviser",
+                                     code_prefix="llm_revision") + events
 
         # Deterministic fixes the LLM is unreliable at (typing, leakage,
         # vocabulary, referential closure). Recorded per chunk.
         # Normalise also the fallback (original) ontology: a failed LLM revision must
         # still drop values that have no support in the source text.
         # `original` (the ontology that was reviewed) is used to restore fields the LLM dropped, e.g. `provision`.
-        revised_ontology_json, changes = _normalize(
-            revised_ontology_json, row["text"], _safe_load(row["ontology"])
-        )
+        revised_ontology_json, changes = _normalize(revised_ontology_json, row["text"], reviewed)
+        change_log = with_provenance(revised_ontology_json, events + list(changes))
 
         if used_fallback:
             status = ("failed_truncated_output" if done_reason == "length"
@@ -232,6 +265,7 @@ def revise_ontologies(
             "revision_status": status,
             "approved_in_round": None,
             "normalization_changes": json.dumps(changes, ensure_ascii=False),
+            "change_log": change_log,
         }
 
     rows = [row for _, row in ontology_reviews.iterrows()]
@@ -511,7 +545,7 @@ def _build_fallback_json(original_ontology: str) -> dict:
         },
         "classes": [],
         "relationships": [],
-        "rights_model": {"permissions": [], "duties": []},
+        "rights_model": {"permissions": [], "prohibitions": [], "duties": []},
         "legal_patterns": [],
         "example_instances": [],
     }

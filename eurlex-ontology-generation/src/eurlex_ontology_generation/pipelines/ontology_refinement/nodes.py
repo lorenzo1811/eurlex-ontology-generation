@@ -25,12 +25,15 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from ...utils.changelog import change, class_target, stamp
 from ...utils.entity_linking import WikidataLinker, load_gazetteer
 from ...utils.ontology_normalize import CORE_ENTITIES, split_composite, type_entity
 from ...utils.ontology_schema import RULE_KINDS
+from ...utils.provenance import evidence_of, merge_evidence
 from ...utils.vocabulary import load_vocabulary
 
 MAX_DESCRIPTIONS = 3
+MAX_EVIDENCE = 10      # evidence items kept per entity, rule and constraint
 
 
 def _dicts(value: Any) -> list[dict]:
@@ -102,6 +105,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
 
     changes: Counter = Counter()
     log: dict[str, list] = defaultdict(list)
+    events: list[dict] = []      # before/after change events (utils/changelog.py)
 
     # ---------------------------------------------------- 1-3: names
     rename: dict[str, str | None] = {}           # old name -> new name (None = removed)
@@ -115,6 +119,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             rename[name] = None
             changes["leakage_removed"] += 1
             log["leakage_removed"].append(leak)
+            events.append(change("leakage_removed", leak, target=class_target(name), before=name))
             continue
         parts = split_composite(name, gazetteer)
         if parts:
@@ -122,12 +127,16 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             rename[name] = None
             changes["composite_split"] += 1
             log["composite_split"].append(f"{name} -> {parts}")
+            events.append(change("composite_split", name, target=class_target(name),
+                                 before=name, after=parts))
             continue
         hit = gazetteer.lookup(name)
         if hit and hit.name != name:
             rename[name] = hit.name
             changes["renamed_to_gazetteer"] += 1
             log["renamed_to_gazetteer"].append(f"{name} -> {hit.name}")
+            events.append(change("renamed_to_gazetteer", name, target=class_target(name),
+                                 before=name, after=hit.name))
 
     # curated merges: every listed name is renamed to the target
     for d in curation:
@@ -136,6 +145,9 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                 if n != d["into"]:
                     rename[n] = d["into"]
                     changes["curated_merge"] += 1
+                    events.append(change("curated_merge", str(d.get("id") or d.get("rationale") or ""),
+                                         actor="human", target=class_target(n),
+                                         before=n, after=d["into"]))
 
     def resolve(name: Any) -> str | None:
         if not isinstance(name, str) or not name.strip():
@@ -161,9 +173,11 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             continue
         e = entities.setdefault(target, {"name": target, "descriptions": [], "support": {},
                                          "type_votes": Counter(), "is_a_votes": Counter(),
-                                         "kind_votes": Counter(), "variants": [], "sources": set()})
+                                         "kind_votes": Counter(), "variants": [], "sources": set(),
+                                         "provenance": []})
         e["variants"].append(cls["name"])
         e["sources"].update(cls.get("sources") or [])
+        e["provenance"] = merge_evidence(e["provenance"], evidence_of(cls), MAX_EVIDENCE)
         sup = _support(cls)
         e["support"] = _add_support(e["support"], sup)
         weight = sup.get("chunks", 1)
@@ -202,6 +216,8 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
         if declared_type and declared_type != t["type"]:
             changes["retyped"] += 1
             log["retyped"].append(f"{name}: {declared_type} -> {t['type']} ({t['type_source']})")
+            events.append(change("retyped", str(t["type_source"]), target=class_target(name) + ".type",
+                                 before=declared_type, after=t["type"]))
         if declared_kind != t["kind"]:
             changes[f"kind_set_{t['kind']}"] += 1
         if t["kind_confidence"] == "low" and t["kind"] == "individual":
@@ -220,6 +236,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
     for d in curation:
         if d.get("type") == "set_typing" and d.get("entity") in typed:
             t = typed[d["entity"]]
+            before = {k: t.get(k) for k in ("type", "is_a", "kind")}
             if d.get("is_a") in vocab.upper:
                 t["is_a"], t["type"] = d["is_a"], vocab.core_type_of(d["is_a"])
             elif d.get("type_value") in vocab.core_types:
@@ -228,6 +245,9 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                 t["kind"] = d["kind"]
             t["type_source"], t["kind_confidence"] = "curated", "high"
             changes["curated_typing"] += 1
+            events.append(change("curated_typing", str(d.get("id") or ""), actor="human",
+                                 target=class_target(d["entity"]), before=before,
+                                 after={k: t.get(k) for k in ("type", "is_a", "kind")}))
 
     # ---------------------------------------------------- 6: rules
     rules: dict[str, dict[tuple, dict]] = {k: {} for k in RULE_KINDS}
@@ -249,6 +269,8 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             for c in _dicts(rule.get("constraints")):
                 sc = vocab.structure_constraint(c)
                 if sc:
+                    if evidence_of(c):
+                        sc["provenance"] = evidence_of(c)
                     constraints.append(sc)
                     if "left_operand" not in c:
                         changes["constraint_structured"] += 1
@@ -263,14 +285,23 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                     changes["rule_merged"] += 1
                 entry["support"] = _add_support(entry["support"], _support(rule))
                 entry.setdefault("sources", set()).update(rule.get("sources") or [])
+                entry["provenance"] = merge_evidence(entry.get("provenance", []), evidence_of(rule),
+                                                     MAX_EVIDENCE)
                 if rule.get("provision"):
                     entry.setdefault("provision", rule["provision"])
-                seen = {(c["left_operand"], c["operator"], c["right_operand"]) for c in entry["constraints"]}
+                by_key = {(c["left_operand"], c["operator"], c["right_operand"]): c
+                          for c in entry["constraints"]}
                 for c in constraints:
                     k = (c["left_operand"], c["operator"], c["right_operand"])
-                    if k not in seen:
+                    if k in by_key:
+                        merged_prov = merge_evidence(by_key[k].get("provenance", []),
+                                                     c.get("provenance", []), MAX_EVIDENCE)
+                        if merged_prov:
+                            by_key[k]["provenance"] = merged_prov
+                    else:
+                        c = dict(c)
                         entry["constraints"].append(c)
-                        seen.add(k)
+                        by_key[k] = c
 
     # ---------------------------------------------------- relations
     relationships: dict[tuple, dict] = {}
@@ -333,6 +364,8 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                 record[k] = t[k]
         if len(e["variants"]) > 1:
             record["merged_from"] = sorted(set(e["variants"]))
+        if e.get("provenance"):
+            record["provenance"] = e["provenance"]
         if t["kind"] == "individual":
             record["instance_of"] = record.pop("is_a")
             individuals.append(record)
@@ -340,8 +373,14 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             docs = int(record["support"].get("documents", 0))
             if name in demoted:
                 record["status"] = "candidate"
+                events.append(change("curated_demote", name, actor="human",
+                                     target=class_target(name) + ".status", after="candidate"))
             elif name in promoted or docs >= min_documents_for_class:
                 record["status"] = "accepted"
+                if name in promoted and docs < min_documents_for_class:
+                    events.append(change("curated_promote", name, actor="human",
+                                         target=class_target(name) + ".status",
+                                         before="candidate", after="accepted"))
             else:
                 record["status"] = "candidate"
                 if docs == min_documents_for_class - 1:
@@ -362,6 +401,9 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             rid = rule_id(k, r)
             if rid in removed_rules:
                 changes["curated_rule_removed"] += 1
+                events.append(change("curated_rule_removed", rid, actor="human",
+                                     target=f"rights_model.{k}[{rid}]",
+                                     before={k2: r.get(k2) for k2 in ("action", "party", "asset")}))
                 continue
             out.append({**r, "id": rid, "sources": sorted(r.get("sources") or [])})
         rights_model[k] = out
@@ -407,6 +449,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
     report = {
         "changes": dict(changes),
         "change_log": {k: v for k, v in log.items()},
+        "events": stamp(events, stage="refinement"),
         "consistency_issues": consistency,
         "review_queue": review_queue,
         "curation_applied": len(curation),

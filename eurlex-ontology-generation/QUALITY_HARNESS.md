@@ -5,6 +5,85 @@ review quality are enforced and measured in code, not left to the prompts.
 
 ## What changed, by issue
 
+### 0. Structural chunking
+`utils/eurlex_structure.py` parses the one-line corpus text of an act into
+preamble (title + citations), recitals, articles and their numbered paragraphs,
+signatures, annexes and footnotes. Numbered units count only when they follow
+the expected numbering and start a sentence, so inline footnote markers
+("Agreement (2) with") and cross-references ("Article 5 of Regulation ...") are
+not boundaries. `eurlex_chunking` (`strategy: structural`) packs consecutive
+units of one section up to `chunk_size` characters, splits long units at
+sentence ends, never mixes recitals and articles, and leaves footnotes and
+signatures out. Each chunk starts with a header line (`§ Article 3(2)–(4)`,
+`§ Recitals (1)–(6)`), so review and revision, which only see the text, know the
+section: `provision` comes from it instead of the old regex guess, and recital
+or preamble chunks are asked for concepts only (`non_binding_note`). Chunks
+carry `section_type`, `articles`, `paragraphs`, `recitals`, `char_start`,
+`char_end`, `segments` (chunk position -> act offset, see
+`chunk_to_act_offset`) and the `footnotes` they reference. On a 2,000-act
+sample: no word cut, 2 of ~13,900 chunks with a footnote left, offsets exact.
+The full corpus gives 1.04M chunks instead of 0.89M; annexes are a third of
+them (`include_annexes: false` drops them). `strategy: window` keeps the old
+fixed windows, now cut at word boundaries.
+
+### 0b. Traceability: source provenance and change log
+**Provenance** (`utils/provenance.py`). The schema asks the LLM for an
+`evidence` quote on every class and rule. After generation and after every
+revision, `attach_provenance` locates it in the chunk (exact, then
+whitespace/quote/case-normalised, then fuzzy: the sentence sharing most words)
+or, without a usable quote, infers the sentence from the element's own words.
+Each class, rule and constraint gets a `source`: CELEX, chunk_id, section,
+article, paragraph or recital, chunk offsets, act offsets (through the chunk
+`segments`), the quoted span and `match` (exact / normalized / fuzzy / inferred
+/ none). A quote not found in the text is logged as `evidence_unverified`.
+Merge and refinement turn `source` into `provenance`, a list of up to 10 such
+items per element. The Turtle links every class, individual, rule and
+constraint with `prov:wasDerivedFrom` to `eo:TextEvidence` nodes carrying
+`dct:source` (the CELLAR CELEX IRI), `oa:TextQuoteSelector` and
+`oa:TextPositionSelector`; `eosh:EvidenceShape` warns about elements without
+evidence. Class links to Wikidata / EU authority IRIs are exported as
+`skos:exactMatch` (individuals keep `owl:sameAs`). `source` fields are removed
+from the ontology shown to the LLM judge and reviser (`strip_provenance`).
+
+**Change log** (`utils/changelog.py`). Every change is an event with `code`
+(reason), `detail`, `actor` (auto_check, llm_reviewer, llm_reviser, normalizer,
+merger, human), `target` (JSON path or element key), `before`, `after`, and,
+once stored, `stage`, `round`, `chunk_id`, `celex`. Cleanup and normalisation
+steps emit before/after events (previously silent ones too:
+`provision_defaulted`, `extensions_synced`, duplicate relationships, examples of
+removed entities). The revision step records what the LLM changed with respect
+to the reviewed ontology (`diff_ontologies`: `llm_revision_added/removed/
+modified`, element by element). Rows of candidates and revisions carry a
+`change_log` column; the refinement report has `events`, with accepted curation
+decisions under actor `human`. `scripts/batch_report.py` summarises both
+(provenance match per element type, events per actor and code).
+
+### 0c. Missing permissions and prohibitions
+Batch 46 and the first structural run (batches 49–53) gave duties only, although
+the articles contain "may" and "shall not" sentences. Causes: the prompt
+template showed an example under `duties` only, a 3B model filling a whole
+ontology at once leaves most rule lists empty, and labels the model invents
+("approve_release") are dropped by the grounding check.
+- `utils/deontic.py` finds the deontic sentences of a chunk and the list each
+  belongs to (prohibitions: shall/may/must not, prohibited; permissions: may,
+  entitled/authorised to; duties: shall, must, required to), skipping formal
+  clauses (entry into force, application, "shall apply", addressees, binding
+  effect), definitions and short list lead-ins.
+- Review check `modal_without_rule` (warning, ODRL code): an article sentence of
+  that kind that no rule rests on (rule `source` span, or its verb). The finding
+  quotes the sentence and names the list; the revision prompt tells the model
+  to add exactly that rule. `rights_model_empty` is no longer raised on recital
+  and preamble chunks, and is only informational when the chunk states no rule.
+- Rules-only pass (`ontology_generation.rules_pass`, on by default for article
+  chunks): a second, narrow call sends the uncovered deontic sentences with
+  their list and gets back only a rights model (constrained to its schema).
+  New rules get `provision` from the section and stub classes for undefined
+  parties/assets, are logged as `rule_added_by_rules_pass` (actor
+  `llm_generator`), then go through the normal cleanup, grounding and
+  provenance.
+- Generation and revision templates show one example per list, the prompt maps
+  modal verbs to lists, and `permission_duty_conflict` keeps both rules.
+
 ### 1. Inconsistent typing
 | Layer | Where | What it does |
 |---|---|---|
@@ -239,7 +318,6 @@ uv run pytest tests/test_quality_harness.py tests/test_rdf_export.py tests/test_
 ## Not done here
 - Corporate-body IRIs other than the Commission's (run `link_identifiers.py`
   with the downloaded authority table).
-- Chunking on article boundaries (recitals are only flagged, not separated).
 - The data outputs committed under `data/05`-`data/08` predate provenance
   tracking, so they have no per-act policies yet. Rerun
   `scripts/run_ontology_merge.py --force` with Ollama running (embedding-based
