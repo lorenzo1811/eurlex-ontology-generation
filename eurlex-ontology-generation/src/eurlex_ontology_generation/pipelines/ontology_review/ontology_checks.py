@@ -14,7 +14,7 @@ from ...utils.entity_linking import load_gazetteer
 from ...utils.eurlex_structure import NON_BINDING, section_of
 from ...utils.ontology_cleanup import action_ungrounded_reason, example_problem, party_far_from_action, rule_key
 from ...utils.ontology_normalize import type_entity
-from ...utils.vocabulary import OTHER_ACTION, load_vocabulary
+from ...utils.vocabulary import OTHER_ACTION, load_vocabulary, split_identifier
 
 # Keep this list aligned with the convention used in the ontology-generation prompt (see the system prompt of the judge)
 ODRL_CORE_NAMES = {
@@ -580,11 +580,23 @@ def verify_weaknesses(
     for weakness in weaknesses:
         reasons = []
         claim = weakness.get("claim", "")
-        path = (weakness.get("json_path") or "").strip()
+        path = normalize_json_path(weakness.get("json_path") or "")
         quote = (weakness.get("quote") or "").strip()
         quote_norm = _norm(quote)
         path_found = True
         value_norm = ""
+
+        # "The ontology lacks X": content the text has and the ontology misses. It has
+        # no json_path by nature; it is kept when X is in the text and not yet modelled.
+        if _MISSING_CLAIM.search(claim):
+            term = _claimed_term(claim) or quote
+            why = _missing_term_problem(term, quote, onto, text_norm)
+            if why:
+                discarded.append({**weakness, "discard_reasons": [why]})
+            else:
+                kept.append({**weakness, "kind": "missing", "term": term,
+                             "evidence": _sentence_with(term if _norm(term) in text_norm else quote, text)})
+            continue
 
         if path:
             path_found, value = resolve_path(onto or {}, path)
@@ -601,10 +613,13 @@ def verify_weaknesses(
                     reasons.append(f"claims '{path}' is empty but it is not")
 
         if path_found:
+            # the quote may come from the ontology value or, for claims that the value
+            # contradicts the text, from the source text (at least a few words of it)
+            from_text = len(quote.split()) >= MIN_TEXT_QUOTE_WORDS and quote_norm in text_norm
             if not quote:
                 reasons.append("no supporting quote")
-            elif path and quote_norm not in value_norm:
-                reasons.append("quote not found in the value at json_path")
+            elif path and quote_norm not in value_norm and not from_text:
+                reasons.append("quote not found in the value at json_path nor in the source text")
             elif not path and quote_norm not in text_norm:
                 reasons.append("quote not found in the source text")
 
@@ -636,9 +651,124 @@ def verify_weaknesses(
         if reasons:
             discarded.append({**weakness, "discard_reasons": reasons})
         else:
-            kept.append(weakness)
+            kept.append({**weakness, "json_path": path} if path else weakness)
 
     return kept, discarded
+
+
+# ------------------------------------------------------------ missing content
+MIN_TEXT_QUOTE_WORDS = 3
+MAX_TO_ADD = 12
+_MISSING_CLAIM = re.compile(
+    r"\b(?:lacks?|lacking|missing|omits?|absent|"
+    r"(?:does|do)\s+not\s+(?:capture|represent|include|define|model|cover|mention)|"
+    r"fails?\s+to\s+(?:capture|represent|include|define|model|cover|mention)|"
+    r"(?:is|are)\s+not\s+(?:captured|represented|included|defined|modell?ed|covered))\b", re.I)
+_QUOTED_TERM = re.compile(r"[‘'\"“]([^’'\"”]{3,80})[’'\"”]")
+
+
+def normalize_json_path(path: str) -> str:
+    """'duties[0].action' -> 'rights_model.duties[0].action'; strips '$.' / 'ontology.'."""
+    p = (path or "").strip().strip("`")
+    p = re.sub(r"^(?:\$\.?|ontology\.)", "", p)
+    if re.match(r"(?:permissions|prohibitions|duties)\b", p):
+        p = "rights_model." + p
+    return p
+
+
+def _claimed_term(claim: str) -> str | None:
+    m = _QUOTED_TERM.search(claim or "")
+    return m.group(1).strip() if m else None
+
+
+def _class_names(onto: dict | None) -> set[str]:
+    return {_norm(c.get("name", "")) for c in _dicts((onto or {}).get("classes"))}
+
+
+def _is_modelled(term: str, onto: dict | None) -> bool:
+    """The term is already a class (same name, or all its words in one class name)."""
+    t = _norm(term)
+    if not t:
+        return False
+    words = {w for w in split_identifier(term) if len(w) >= 3}  # noqa: PLR2004
+    for c in _dicts((onto or {}).get("classes")):
+        name = _norm(c.get("name", ""))
+        if t == name or t in name:
+            return True
+        if words and words <= {w for w in split_identifier(c.get("name", ""))}:
+            return True
+    return False
+
+
+def _missing_term_problem(term: str, quote: str, onto: dict | None, text_norm: str) -> str | None:
+    if not term:
+        return "missing content without a term or quote"
+    if _norm(term) not in text_norm and not (quote and _norm(quote) in text_norm):
+        return "missing concept not in the source text"
+    if _is_modelled(term, onto):
+        return "missing concept is already in the ontology"
+    return None
+
+
+def _sentence_with(term: str, text: str) -> str:
+    """The sentence of `text` that contains `term` (case-insensitive), or ''."""
+    t = _norm(term)
+    for sentence in re.split(r"(?<=[.;:])\s+|\n", text or ""):
+        if t and t in _norm(sentence):
+            return sentence.strip()[:400]
+    return ""
+
+
+def build_to_add(missing_concepts: list[str], grounded: list[dict], findings: list[dict],
+                 text: str) -> list[dict]:
+    """What the revision must add: concepts the reviewer found missing (verified),
+    and article sentences that state a rule no rule covers (modal_without_rule)."""
+    items, seen = [], set()
+    for term in list(missing_concepts) + [w["term"] for w in grounded if w.get("kind") == "missing"]:
+        key = _norm(term)
+        if key and key not in seen:
+            seen.add(key)
+            items.append({"kind": "concept", "term": term, "evidence": _sentence_with(term, text)})
+    for f in findings:
+        if f["code"] == "modal_without_rule" and f.get("data"):
+            items.append({"kind": "rule", "list": f["data"]["rule_kind"], "sentence": f["data"]["sentence"]})
+    return items[:MAX_TO_ADD]
+
+
+def check_to_add(onto: dict | None, to_add: list[dict]) -> list[dict]:
+    """After a revision: concepts the revision had to add and did not.
+    (Rule sentences are re-checked by modal_without_rule on the revised ontology.)"""
+    findings = []
+    for item in to_add or []:
+        if item.get("kind") == "concept" and not _is_modelled(item.get("term", ""), onto):
+            findings.append(_finding(
+                "missing_not_addressed", "warning",
+                f"The revision did not add the missing concept '{item['term']}'.",
+                f"Add '{item['term']}' as a class grounded in: \"{item.get('evidence', '')[:200]}\"",
+                data=item,
+            ))
+    return findings
+
+
+def revision_brief(review: dict | str) -> str:
+    """The part of a review the reviser needs: verified weaknesses, amendments,
+    what to add, hallucinations. Discarded claims, scores and strengths stay out."""
+    if isinstance(review, str):
+        try:
+            review = json.loads(review)
+        except json.JSONDecodeError:
+            return review
+    if not isinstance(review, dict):
+        return json.dumps(review, ensure_ascii=False)
+    brief = {
+        "weaknesses": [{k: w.get(k) for k in ("claim", "json_path", "suggested_fix") if w.get(k)}
+                       for w in review.get("weaknesses") or [] if w.get("kind") != "missing"],
+        "suggested_amendments": review.get("suggested_amendments") or [],
+        "to_add": review.get("to_add") or [],
+        "hallucinations": review.get("hallucinations") or [],
+        "unsupported_concepts": review.get("unsupported_concepts") or [],
+    }
+    return json.dumps(brief, ensure_ascii=False)
 
 
 """

@@ -45,6 +45,16 @@ ontology_review:
     # code: findings sharing a code count once (ten mistyped classes are one
     #       problem). finding: every finding counts (original behaviour).
     count_by: code
+    # Warnings that block approval on their own, whatever the scores: a duty or
+    # prohibition from a recital, a constraint value not in the text, an article
+    # sentence stating a rule no rule covers, a concept the revision was asked to
+    # add and did not. Unapproved chunks are still merged (exclude_unapproved:
+    # false); they count in support.chunks but not in support.approved_chunks.
+    blocking_codes:
+      - rule_from_recital
+      - ungrounded_value
+      - modal_without_rule
+      - missing_not_addressed
 
   system_prompt: |
     You are an expert reviewer of ontologies extracted from EUR-Lex legal texts and aligned to ODRL 2.2.

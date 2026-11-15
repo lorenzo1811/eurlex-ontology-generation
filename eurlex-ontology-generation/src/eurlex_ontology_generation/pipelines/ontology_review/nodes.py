@@ -8,6 +8,8 @@ from ...utils.llm_client import llm_chat, run_parallel
 from ...utils.persist import append_dedup_csv
 from ...utils.provenance import strip_provenance
 from .ontology_checks import (
+    build_to_add,
+    check_to_add,
     compute_scores,
     count_warnings,
     filter_missing_concepts,
@@ -246,12 +248,17 @@ def _build_review(
     # the LLM's opinion, which is kept only for reference.
     overall_score, odrl_compliance = compute_scores(findings, len(grounded), count_by)
 
+    # Warnings whose code is listed in blocking_codes block approval on their own
+    # (e.g. a duty taken from a recital, a value not in the text, a missed rule).
+    blocking = sorted({f["code"] for f in findings
+                       if f["severity"] != "info" and f["code"] in set(thresholds.get("blocking_codes") or [])})
     approved = (
         overall_score >= thresholds["min_overall_score"]
         and odrl_compliance >= thresholds["min_odrl_compliance"]
         and len(grounded) <= thresholds["max_verified_weaknesses"]
         and n_warnings <= thresholds["max_warnings"]
         and not errors
+        and not blocking
     )
 
     # Amendments come only from automatic findings and grounded weaknesses,
@@ -281,6 +288,7 @@ def _build_review(
     # regenerated than patched.
     recommended_action = "regenerate" if errors else "patch"
 
+    missing = filter_missing_concepts(review.missing_concepts, onto, chunk_text)
     review_dict = {
         "status": "ok",
         "overall_score": overall_score,
@@ -288,12 +296,13 @@ def _build_review(
         "llm_overall_score": review.overall_score,
         "llm_odrl_compliance": review.odrl_compliance,
         "json_valid": True,
+        "blocking_findings": blocking,
         "strengths": review.strengths,
         "weaknesses": grounded,
         "discarded_weaknesses": discarded,
-        "missing_concepts": filter_missing_concepts(
-            review.missing_concepts, onto, chunk_text
-        ),
+        "missing_concepts": missing,
+        # what the revision must add, checked again after it (missing_not_addressed)
+        "to_add": build_to_add(missing, grounded, findings, chunk_text),
         "unsupported_concepts": filter_ungrounded_terms(
             review.unsupported_concepts, ontology_json, chunk_text
         ),
@@ -312,6 +321,60 @@ def _build_review(
     }
 
     return review_dict, approved
+
+
+def _json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    try:
+        data = json.loads(value) if isinstance(value, str) and value.strip() else []
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _json_dict(value) -> dict:
+    try:
+        data = json.loads(value) if isinstance(value, str) else value
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def same_content(a, b) -> bool:
+    """Same ontology, ignoring provenance fields (re-located after each step)."""
+    try:
+        da = strip_provenance(json.loads(a) if isinstance(a, str) else a)
+        db = strip_provenance(json.loads(b) if isinstance(b, str) else b)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    return json.dumps(da, sort_keys=True, ensure_ascii=False) == json.dumps(db, sort_keys=True, ensure_ascii=False)
+
+
+def rows_of_round(rows: pd.DataFrame, review_round: int) -> pd.DataFrame:
+    """The revisions of `review_round` (revisions are stored per chunk and round);
+    files from before that change have no round column: their rows are kept."""
+    if "round" not in rows.columns:
+        return rows.reset_index(drop=True)
+    r = rows["round"].fillna(0).astype(int)
+    selected = rows[r == review_round]
+    if selected.empty:      # older file: one row per chunk, latest round
+        selected = rows.assign(_r=r).sort_values("_r").drop_duplicates("chunk_id", keep="last").drop(columns="_r")
+    return selected.reset_index(drop=True)
+
+
+def previous_reviews(batch_id: int, batch_group_size: int, reviews_directory: str,
+                     review_round: int) -> dict[str, dict]:
+    """chunk_id -> review row of `review_round` for this batch ({} if none)."""
+    path = Path(reviews_directory) / f"part_{get_batch_group_id(batch_id, batch_group_size):03d}.csv"
+    if not path.exists() or review_round < 0:
+        return {}
+    reviews = pd.read_csv(path, encoding="utf-8")
+    if "round" not in reviews.columns:
+        reviews["round"] = 0
+    reviews = reviews[(reviews["batch_id"] == batch_id)
+                      & (reviews["round"].fillna(0).astype(int) == review_round)]
+    return {r["chunk_id"]: r.to_dict() for _, r in reviews.iterrows()}
 
 
 # Executes deterministic checks and LLM judge reviews on candidate ontologies in parallel
@@ -333,22 +396,31 @@ def review_ontologies(
     review_round: int = 0,
     source: str = "candidates",
     revisions_directory: str | None = None,
+    reviews_directory: str | None = None,
 ) -> pd.DataFrame:
     """Review one batch.
 
     round 0 reviews the generator's candidates (source='candidates').
-    round >= 1 re-reviews the latest revisions (source='revisions'), which
+    round >= 1 re-reviews the revisions of that round (source='revisions'), which
     closes the loop: a revision is only trusted once it has been reviewed.
+
+    A revision identical to the ontology reviewed in the previous round (same
+    content, provenance aside) is not sent to the LLM judge again: the previous
+    review is reused (`reused_unchanged`). If it was not approved, the chunk is
+    `stalled`: another round would not change it, so it is not revised again.
     """
+    previous: dict[str, dict] = {}
     if source == "revisions":
         if not revisions_directory:
             raise ValueError("revisions_directory is required when source='revisions'.")
-        ontology_candidates = load_ontology_candidates(
+        ontology_candidates = rows_of_round(load_ontology_candidates(
             batch_id=batch_id,
             batch_group_size=batch_group_size,
             candidates_directory=revisions_directory,
-        )
+        ), review_round)
         source_chunks = None          # revisions carry their own source text
+        if reviews_directory:
+            previous = previous_reviews(batch_id, batch_group_size, reviews_directory, review_round - 1)
     else:
         ontology_candidates = load_ontology_candidates(
             batch_id=batch_id,
@@ -375,9 +447,29 @@ def review_ontologies(
             if segments is None and isinstance(chunk.get("segments"), str):
                 segments = chunk["segments"]
         ontology_json = row["ontology"]
+        to_add = _json_list(row.get("to_add"))
 
-        # Run deterministic rule checks on candidate JSON
+        # Unchanged since the last review: reuse it instead of asking the judge again
+        prev = previous.get(row["chunk_id"])
+        if prev is not None and same_content(prev["ontology"], ontology_json):
+            prev_approved = str(prev.get("approved")).strip().lower() == "true"
+            review_dict = _json_dict(prev.get("review"))
+            review_dict.update(reused_from_round=int(prev["round"]), stalled=not prev_approved)
+            return {
+                "batch_id": batch_id, "chunk_id": row["chunk_id"], "round": review_round,
+                "CELEX": row["CELEX"], "text": chunk_text, "ontology": ontology_json,
+                "review": json.dumps(review_dict, ensure_ascii=False),
+                "status": "reused_unchanged" if prev_approved else "stalled",
+                "error_reason": None, "automatic_checks": prev.get("automatic_checks"),
+                "approved": prev_approved, "revision_required": False,
+                "segments": segments, "to_add": json.dumps(review_dict.get("to_add") or [], ensure_ascii=False),
+            }
+
+        # Run deterministic rule checks on candidate JSON; after a revision, also
+        # check that what the review asked to add was added
         onto, findings = run_deterministic_checks(ontology_json, chunk_text)
+        if onto is not None and to_add:
+            findings += check_to_add(onto, to_add)
 
         status = "ok"
         error_reason = None
@@ -447,6 +539,7 @@ def review_ontologies(
             "approved": approved,
             "revision_required": revision_required,
             "segments": segments,      # chunk -> act offsets, for the provenance of revisions
+            "to_add": json.dumps(review_dict.get("to_add") or [], ensure_ascii=False),
         }
 
     rows = [row for _, row in ontology_candidates.iterrows()]

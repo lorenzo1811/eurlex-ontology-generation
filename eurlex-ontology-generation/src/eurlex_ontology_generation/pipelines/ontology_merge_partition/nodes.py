@@ -34,6 +34,11 @@ def load_partition_revisions(part_id: int, revisions_directory: str,
     revisions = pd.read_csv(path, encoding="utf-8")
     if revisions.empty:
         raise ValueError(f"Revisions partition {path} is empty.")
+    # revisions are kept per (chunk, round): merge the latest round of each chunk
+    if "round" in revisions.columns:
+        revisions = (revisions.assign(_r=revisions["round"].fillna(0).astype(int))
+                     .sort_values("_r").drop_duplicates("chunk_id", keep="last")
+                     .drop(columns="_r").reset_index(drop=True))
 
     revisions["approved"] = False
     review_path = Path(reviews_directory) / f"part_{part_id:03d}.csv" if reviews_directory else None

@@ -111,6 +111,34 @@ alone recovers 5 (e.g. monitor_fulfillment -> monitor_fulfilment, grant_disburse
 -> suspend_disbursement); the rest goes to the LLM step. `batch_report.py`
 reports repaired vs removed.
 
+### 0e. Review loop: missing content, blocking warnings, unchanged rounds
+- Missing content. A reviewer weakness that says the ontology "lacks / does not
+  capture / is missing" something is no longer discarded for having no
+  `json_path`: it becomes a `kind: missing` weakness when the term is in the
+  source text and not already a class (otherwise it is discarded with that
+  reason). Weaknesses quoting the source text (3+ words) instead of the
+  ontology value are kept; paths without `rights_model.` are completed. On the
+  phase-4 reviews this keeps 86 of 169 weaknesses instead of 49.
+- `to_add`: verified `missing_concepts`, missing-content weaknesses and the
+  `modal_without_rule` sentences form one list in the review. The revision
+  prompt gets a brief (`revision_brief`: verified weaknesses, amendments,
+  `to_add`, hallucinations; no discarded claims, scores or strengths) and must
+  add every item. The list travels with the revision row; the next review
+  checks it (`missing_not_addressed` for concepts; rule sentences are re-checked
+  by `modal_without_rule`). Deterministic amendments (undefined entities,
+  gazetteer typing, leakage) are applied by the normaliser after the revision.
+- `approval_thresholds.blocking_codes` (rule_from_recital, ungrounded_value,
+  modal_without_rule, missing_not_addressed) block approval by themselves.
+  Unapproved chunks are still merged (`exclude_unapproved: false`), counted in
+  `support.chunks` but not in `support.approved_chunks`.
+- Unchanged revisions: a revision with the same content as the ontology
+  reviewed in the previous round (provenance aside) reuses that review instead
+  of calling the judge (`status: reused_unchanged`); if it was not approved the
+  chunk is `stalled`, is not revised again (`skipped_stalled`) and counts as
+  settled for the batch runner's early stop.
+- Revisions are stored per `(chunk_id, round)`; the re-review reads the round it
+  judges, the merge and `batch_report.py` the latest round of each chunk.
+
 ### 1. Inconsistent typing
 | Layer | Where | What it does |
 |---|---|---|

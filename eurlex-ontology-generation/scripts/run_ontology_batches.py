@@ -208,7 +208,10 @@ def validate_review_output(
     approved = int(
         batch_reviews["approved"].astype(str).str.strip().str.lower().eq("true").sum()
     )
-    return True, approved
+    # a stalled chunk (unchanged by its last revision, still not approved) will not
+    # change in a further round either: for the early stop it counts as settled
+    stalled = int(batch_reviews["status"].astype(str).eq("stalled").sum())
+    return True, approved + stalled
 
 
 """
@@ -220,7 +223,8 @@ batch must not be marked as completed.
 def validate_revision_output(
     batch_id: int,
     expected_count: int,
-) -> bool:    
+    revision_round: int | None = None,
+) -> bool:
 
     group_id = batch_id // 1000
 
@@ -243,6 +247,11 @@ def validate_revision_output(
     batch_revisions = revisions[
         revisions["batch_id"] == batch_id
     ]
+    # revisions are kept per (chunk, round): check the round just written
+    if revision_round is not None and "round" in batch_revisions.columns:
+        batch_revisions = batch_revisions[
+            batch_revisions["round"].fillna(0).astype(int) == revision_round
+        ]
 
     if len(batch_revisions) != expected_count:
         print(
@@ -296,7 +305,7 @@ def run_batch(
     if not valid:
         print(f"Ontology review validation failed for batch {batch_id}.")
         return False
-    print(f"[batch {batch_id}] round 0: {approved}/{expected_count} approved", flush=True)
+    print(f"[batch {batch_id}] round 0: {approved}/{expected_count} approved or stalled", flush=True)
 
     # Steps 3+: revise, then re-review the revision. Even when everything is
     # approved in round 0 one revision pass runs, so that every chunk goes
@@ -309,7 +318,8 @@ def run_batch(
 
         # The revision pipeline can keep the original ontology when
         # the LLM output is truncated or invalid. Detect that explicitly.
-        if not validate_revision_output(batch_id=batch_id, expected_count=expected_count):
+        if not validate_revision_output(batch_id=batch_id, expected_count=expected_count,
+                                        revision_round=review_round):
             print(f"Ontology revision validation failed for batch {batch_id}.")
             return False
 
@@ -323,7 +333,7 @@ def run_batch(
         if not valid:
             print(f"Ontology re-review validation failed for batch {batch_id}.")
             return False
-        print(f"[batch {batch_id}] round {review_round}: {approved}/{expected_count} approved",
+        print(f"[batch {batch_id}] round {review_round}: {approved}/{expected_count} approved or stalled",
               flush=True)
         if approved == expected_count:
             break

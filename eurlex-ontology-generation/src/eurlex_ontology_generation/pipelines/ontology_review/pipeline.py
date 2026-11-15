@@ -28,6 +28,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                 "params:ontology_review.round",
                 "params:ontology_review.source",
                 "params:ontology_review.revisions_directory",
+                "params:ontology_review.output_directory",   # previous rounds, for reuse
             ],
             outputs="ontology_reviews_batch",
             name="review_ontologies_node",

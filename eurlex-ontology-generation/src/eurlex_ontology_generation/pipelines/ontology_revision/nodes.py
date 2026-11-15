@@ -11,6 +11,7 @@ from ...utils.ontology_schema import build_ontology_model
 from ...utils.persist import append_dedup_csv, persist_removed_items
 from ...utils.provenance import attach_provenance, strip_provenance
 from ...utils.repair import build_repairer
+from ..ontology_review.ontology_checks import revision_brief
 from ...utils.vocabulary import load_vocabulary, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,8 @@ def revise_ontologies(
             "CELEX": row["CELEX"],
             "text": row["text"],
             "segments": segments_json,
+            # what the review asked to add; the next review checks it was added
+            "to_add": row.get("to_add") if isinstance(row.get("to_add"), str) else "[]",
         }
 
         def with_provenance(ontology: dict, events: list) -> str:
@@ -182,15 +185,19 @@ def revise_ontologies(
                 kept, changes = None, []
             change_log = with_provenance(kept, list(changes))
             ontology = json.dumps(kept, ensure_ascii=False) if kept is not None else row["ontology"]
+            stalled = str(row.get("status")) == "stalled"
+            approved = str(row.get("approved")).strip().lower() == "true"
             return {**base, "ontology": ontology, "revised": False,
-                    "revision_status": "skipped_not_required",
-                    "approved_in_round": int(row.get("round", 0) or 0),
+                    "revision_status": "skipped_stalled" if stalled else "skipped_not_required",
+                    "approved_in_round": int(row.get("round", 0) or 0) if approved else None,
                     "normalization_changes": json.dumps(changes, ensure_ascii=False),
                     "change_log": change_log}
 
         user_prompt = render_prompt(
             user_prompt_template, vocabulary_path,
-            ontology=strip_provenance(row["ontology"]), text=row["text"], review=row["review"],
+            # only what the reviser needs: verified weaknesses, amendments, to_add
+            ontology=strip_provenance(row["ontology"]), text=row["text"],
+            review=revision_brief(row["review"]),
         )
 
         revised_ontology_json, used_fallback, response = None, True, None
@@ -297,7 +304,8 @@ def persist_ontology_revisions(
     # removals that could not be repaired go to a review queue (one row per event)
     persist_removed_items(ontology_revised, removed_items_directory, group_id)
 
-    return append_dedup_csv(output_path, ontology_revised)
+    # one row per (chunk, round): the history of revisions is kept
+    return append_dedup_csv(output_path, ontology_revised, key=["chunk_id", "round"])
 
 
 # Node 2: validate revised ontologies (schema + grounding checks)

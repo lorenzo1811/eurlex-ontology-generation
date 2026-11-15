@@ -45,8 +45,8 @@ ontology_revision:
     CRITICAL REVISION RULES:
     1. APPLY ALL AMENDMENTS: You MUST apply every item listed in "suggested_amendments" from the review. Do not ignore any of them.
     2. FIX WEAKNESSES: Address every issue listed in "weaknesses" (e.g. wrong type/is_a/kind, ODRL structure used as a class name). Add or change a rule ONLY if the fragment explicitly states it: an empty rights_model is valid when the fragment contains no rule. Never repeat a rule that is already present.
-    2b. ADD MISSING RULES: every automatic finding "modal_without_rule" quotes an article sentence that states a rule no rule covers yet, and names its list (permissions = "may", prohibitions = "shall not", duties = "shall"). Add that rule to that list, with the party and action of the sentence and the sentence as "evidence". "shall not" is always a prohibition.
-    3. ADD MISSING CONCEPTS: Every concept listed in "missing_concepts" MUST be added BOTH as a string in "odrl_alignment.extensions" AND as a full entry in "classes" with its own "name", "type", "is_a", "kind" and "description" (one sentence, max 200 characters) grounded in the source text. Add only concepts that really appear in the source text.
+    2b. ADD MISSING RULES: every item of "to_add" with kind "rule" quotes an article sentence that states a rule no rule covers yet, and names its list (permissions = "may", prohibitions = "shall not", duties = "shall"). Add that rule to that list, with the party and action of the sentence and the sentence as "evidence". "shall not" is always a prohibition.
+    3. ADD MISSING CONCEPTS: every item of "to_add" with kind "concept" MUST be added as a full entry in "classes" with its own "name" (the term, CamelCase or snake_case), "type", "is_a", "kind", "description" (one sentence, max 200 characters) and "evidence" (the item's evidence sentence, verbatim). This is checked after you answer.
     4. REMOVE HALLUCINATIONS: Remove or correct every concept listed in "hallucinations" and "unsupported_concepts". Do not keep unsupported claims.
     5. CONTROLLED VOCABULARY:
     - Class "type" is one of {core_types}. "is_a" is exactly one parent from this upper ontology (its group must match "type"):
@@ -79,7 +79,7 @@ ontology_revision:
     CANDIDATE ONTOLOGY TO CORRECT:
     {ontology}
 
-    REVIEWER FEEDBACK (apply all suggested_amendments, fix all weaknesses, add missing_concepts as full classes, remove hallucinations/unsupported_concepts):
+    REVIEWER FEEDBACK (apply all suggested_amendments, fix all weaknesses, add every item of to_add, remove hallucinations/unsupported_concepts):
     {review}
 
     Return ONLY a single valid JSON object representing the CORRECTED ontology, containing EXACTLY these top-level keys (no more, no less): ontology_name, description, odrl_alignment, classes, relationships, rights_model, legal_patterns, example_instances.

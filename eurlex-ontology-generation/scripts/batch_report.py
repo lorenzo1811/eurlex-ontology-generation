@@ -150,7 +150,9 @@ def reviews_report(df) -> dict:
             missing_examples.extend(missing[: max(0, 10 - len(missing_examples))])
         out[str(int(rnd))] = {
             "chunks": len(part),
-            "approved": int(part["approved"].fillna(False).astype(bool).sum()),
+            "approved": int(part["approved"].astype(str).str.lower().eq("true").sum()),
+            "status": dict(Counter(part["status"].astype(str))) if "status" in part else {},
+            "to_add_items": sum(len(_load(v) or []) for v in part.get("to_add", pd.Series(dtype=str)).dropna()),
             "automatic_findings": dict(findings.most_common()),
             "weaknesses_kept": kept,
             "weaknesses_discarded": discarded,
@@ -162,13 +164,24 @@ def reviews_report(df) -> dict:
     return out
 
 
+def _strip_prov(x):
+    if isinstance(x, dict):
+        return {k: _strip_prov(v) for k, v in x.items() if k not in ("source", "provenance")}
+    if isinstance(x, list):
+        return [_strip_prov(v) for v in x]
+    return x
+
+
 def unchanged_rereviews(df) -> dict:
-    """Chunks whose ontology was identical in consecutive review rounds."""
+    """Chunks whose ontology was identical in consecutive review rounds, and how
+    many of those were sent to the LLM judge again (vs. review reused)."""
     by_chunk = defaultdict(dict)
+    status = {}
     for _, row in df.iterrows():
         onto = _load(row.get("ontology"))
-        by_chunk[row["chunk_id"]][int(row["round"])] = _canon(onto) if onto is not None else None
-    pairs, unchanged, ids = 0, 0, []
+        by_chunk[row["chunk_id"]][int(row["round"])] = _canon(_strip_prov(onto)) if onto is not None else None
+        status[(row["chunk_id"], int(row["round"]))] = str(row.get("status"))
+    pairs, unchanged, judged_again, ids = 0, 0, 0, []
     for chunk_id, rounds in by_chunk.items():
         ordered = sorted(rounds)
         for a, b in zip(ordered, ordered[1:]):
@@ -176,13 +189,25 @@ def unchanged_rereviews(df) -> dict:
             if rounds[a] is not None and rounds[a] == rounds[b]:
                 unchanged += 1
                 ids.append(f"{chunk_id}@{b}")
-    return {"round_pairs": pairs, "unchanged": unchanged, "examples": ids[:20]}
+                judged_again += status.get((chunk_id, b)) not in ("reused_unchanged", "stalled")
+    return {"round_pairs": pairs, "unchanged": unchanged, "unchanged_judged_again_by_llm": judged_again,
+            "examples": ids[:20]}
 
 
-def revisions_report(df) -> dict:
+def _latest_round(df):
+    """Revisions are stored per (chunk, round): keep the latest round of each chunk."""
+    if "round" not in df.columns:
+        return df
+    return (df.assign(_r=df["round"].fillna(0).astype(int)).sort_values("_r")
+            .drop_duplicates("chunk_id", keep="last").drop(columns="_r"))
+
+
+def revisions_report(all_rounds) -> dict:
+    df = _latest_round(all_rounds)
     ontos = [_load(v) for v in df["ontology"]]
     return {
         "chunks": len(df),
+        "rows_all_rounds": len(all_rounds),
         "status": dict(Counter(df.get("revision_status", pd.Series(dtype=str)).fillna("?"))),
         "rules": _rule_counts(o for o in ontos if isinstance(o, dict)),
         "normalization_changes": (_note_codes(df["normalization_changes"])
@@ -250,7 +275,7 @@ def main() -> None:
         report["revisions"] = revisions_report(revisions)
     if args.refined:
         refined = json.loads(Path(args.refined).read_text(encoding="utf-8"))
-        source = revisions if revisions is not None else candidates
+        source = _latest_round(revisions) if revisions is not None else candidates
         if source is not None:
             ontos = [o for o in (_load(v) for v in source["ontology"]) if isinstance(o, dict)]
             report["merge_coverage"] = coverage_report(ontos, refined)
