@@ -172,7 +172,9 @@ def drop_duplicate_rules(onto: dict, notes: list) -> None:
                                 target=rule_target("permissions", r)))
 
 
-def drop_ungrounded_actions(onto: dict, text: str, notes: list) -> None:
+def drop_ungrounded_actions(onto: dict, text: str, notes: list, repairer=None) -> None:
+    """Rules whose action has no trace in the text are repaired when the text
+    supports a corrected label (utils/repair.py), and removed only otherwise."""
     rm = onto.get("rights_model")
     if not isinstance(rm, dict) or not text:
         return
@@ -180,6 +182,17 @@ def drop_ungrounded_actions(onto: dict, text: str, notes: list) -> None:
         kept = []
         for r in rm.get(k) or []:
             why = action_ungrounded_reason(r, text)
+            if why and repairer is not None:
+                fixed = repairer.repair_action(r, text, why, action_ungrounded_reason)
+                if fixed:
+                    new, method = fixed
+                    notes.append(change("rule_action_repaired", f"{method} ({why})",
+                                        actor="llm_reviewer" if method == "llm" else "normalizer",
+                                        target=rule_target(k, r),
+                                        before={"action": r.get("action"), "action_label": r.get("action_label")},
+                                        after={"action": new.get("action"), "action_label": new.get("action_label")}))
+                    kept.append(new)
+                    continue
             if why:
                 notes.append(change("rule_ungrounded_dropped", f"{k}:{_rule_label(r)} ({why})",
                                     target=rule_target(k, r), before=r))
@@ -204,8 +217,9 @@ def example_problem(example: dict, text: str) -> str | None:
     return None
 
 
-def fix_examples(onto: dict, text: str, notes: list, max_context: int = 600) -> None:
-    """Keep only examples that quote the text; repair a bad context when the value is in the text."""
+def fix_examples(onto: dict, text: str, notes: list, max_context: int = 600, repairer=None) -> None:
+    """Keep only examples that quote the text; repair a value written differently in the
+    text, and a bad context when the value is in the text."""
     if "example_instances" not in onto or not text:
         return
     sentences = _sentences(text)
@@ -214,6 +228,14 @@ def fix_examples(onto: dict, text: str, notes: list, max_context: int = 600) -> 
         if not isinstance(e, dict):
             continue
         problem = example_problem(e, text)
+        if problem == "value_not_in_text" and repairer is not None:
+            fixed = repairer.repair_example(e, text)
+            if fixed:
+                notes.append(change("example_value_repaired", fixed[1],
+                                    target=f"example_instances[{e.get('entity')}].example_value",
+                                    before=e.get("example_value"), after=fixed[0]["example_value"]))
+                e = fixed[0]
+                problem = example_problem(e, text)
         if problem == "value_not_in_text":
             notes.append(change("example_dropped", f"{e.get('entity')}: value not in text",
                                 target=f"example_instances[{e.get('entity')}]", before=e))
@@ -396,14 +418,16 @@ def party_far_from_action(rule: dict, text: str, max_gap: int = 150) -> bool:
 def cleanup_ontology(onto: dict, text: str, original: dict | None = None,
                      caps: dict | None = None, description_cap: int = 300,
                      default_provision: str | None = "article",
-                     drop_recital_rules: bool = True) -> tuple[dict, list]:
-    """Apply every step. Returns (clean_ontology, notes); the input is not modified."""
+                     drop_recital_rules: bool = True, repairer=None) -> tuple[dict, list]:
+    """Apply every step. Returns (clean_ontology, notes); the input is not modified.
+    With a `repairer` (utils/repair.py) unsupported values are corrected when the
+    text allows it, and removed only otherwise."""
     onto = copy.deepcopy(onto)
     notes: list = []
     warn_lists_at_cap(onto, caps or DEFAULT_CAPS, notes)
     drop_duplicate_rules(onto, notes)
-    drop_ungrounded_actions(onto, text, notes)
-    fix_examples(onto, text, notes)
+    drop_ungrounded_actions(onto, text, notes, repairer)
+    fix_examples(onto, text, notes, repairer=repairer)
     trim_descriptions(onto, notes, description_cap)
     fill_provision(onto, original, notes, default_provision)
     apply_provision_evidence(onto, text, notes, drop_recital=drop_recital_rules)

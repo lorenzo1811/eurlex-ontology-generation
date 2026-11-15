@@ -8,8 +8,9 @@ from ...utils.changelog import change, diff_ontologies, stamp
 from ...utils.llm_client import llm_chat, run_parallel
 from ...utils.ontology_normalize import normalize_chunk_ontology
 from ...utils.ontology_schema import build_ontology_model
-from ...utils.persist import append_dedup_csv
+from ...utils.persist import append_dedup_csv, persist_removed_items
 from ...utils.provenance import attach_provenance, strip_provenance
+from ...utils.repair import build_repairer
 from ...utils.vocabulary import load_vocabulary, render_prompt
 
 logger = logging.getLogger(__name__)
@@ -127,17 +128,21 @@ def revise_ontologies(
     normalize_after_revision: bool = True,
     vocabulary_path: str | None = None,
     max_retries: int = 2,
+    repair: dict | None = None,
 ) -> pd.DataFrame:
 
     rendered_system_prompt = render_prompt(system_prompt, vocabulary_path)
     schema_model = build_ontology_model(vocabulary_path) if json_mode else None
+    # corrects unsupported values before the normaliser would remove them (utils/repair.py)
+    repairer = build_repairer(repair, vocabulary_path)
 
     def _normalize(ontology: dict, text: str | None = None,
                    original: dict | None = None) -> tuple[dict, list]:
         if not normalize_after_revision:
             return ontology, []
         return normalize_chunk_ontology(
-            ontology, load_vocabulary(vocabulary_path), source_text=text, original=original
+            ontology, load_vocabulary(vocabulary_path), source_text=text, original=original,
+            repairer=repairer,
         )
 
     ontology_reviews = load_ontology_reviews(
@@ -280,7 +285,8 @@ def persist_ontology_revisions(
     batch_id: int,
     batch_group_size: int,
     output_directory: str,
-) -> str:    
+    removed_items_directory: str | None = None,
+) -> str:
 
     group_id = get_batch_group_id(
         batch_id=batch_id,
@@ -288,6 +294,8 @@ def persist_ontology_revisions(
     )
 
     output_path = Path(output_directory) / f"part_{group_id:03d}.csv"
+    # removals that could not be repaired go to a review queue (one row per event)
+    persist_removed_items(ontology_revised, removed_items_directory, group_id)
 
     return append_dedup_csv(output_path, ontology_revised)
 

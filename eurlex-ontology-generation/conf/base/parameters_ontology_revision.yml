@@ -25,6 +25,9 @@ ontology_revision:
 
   # Persistent directory containing revised ontologies.
   output_directory: data/04_feature/ontology_revisions
+  removed_items_directory: ${globals:removed_items_directory}
+  repair: ${globals:repair}   # repair instead of delete (conf/base/globals.yml)
+  max_retries: 2              # LLM attempts after the first one (warmer each time)
 
   # Persistent directory containing revision validation reports.
   validation_output_directory: data/04_feature/ontology_revision_reports

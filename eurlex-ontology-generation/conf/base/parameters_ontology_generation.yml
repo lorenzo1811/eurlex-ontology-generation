@@ -10,9 +10,18 @@ ontology_generation:
   batch_id: 0             # Target batch identifier to process from the manifest
   batch_group_size: 1000  # Number of batches that are grouped into the same persistent file
   output_directory: data/04_feature/ontology_candidates
+  removed_items_directory: ${globals:removed_items_directory}
+  repair: ${globals:repair}   # repair instead of delete (conf/base/globals.yml)
   temperature: 0.1        # Controls randomness: lower values (close to 0) make output deterministic
   ontology_domain: ODRL   # Domain of the ontology
   json_mode: true
+  # Ollama's default context (2048-4096 tokens) is smaller than system prompt +
+  # template + chunk, and Ollama truncates the prompt silently. num_predict caps
+  # a runaway structured answer; a failed chunk is retried max_attempts times,
+  # then stored empty with a `generation_failed` event (the batch goes on).
+  num_ctx: 8192
+  num_predict: 3072
+  max_attempts: 2
 
   # Post-processing in code (utils/ontology_cleanup.py)
   skip_footnote_chunks: true   # chunks made only of footnotes "(7) ... (OJ L ...)" are not sent to the LLM

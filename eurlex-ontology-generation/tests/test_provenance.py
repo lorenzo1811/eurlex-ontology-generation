@@ -105,12 +105,17 @@ def test_every_element_gets_a_source_with_act_offsets():
     assert events == []
 
 
-def test_unverified_quotes_are_logged():
+def test_unverified_quotes_are_repaired_or_logged():
     onto = _onto()
+    # a wrong quote, but the class name points to a sentence: the quote is replaced
     onto["classes"][0]["evidence"] = "The Council adopted a regulation on fisheries in 1990"
+    # a wrong quote and nothing in the text: flagged
+    onto["classes"].append({"name": "Fisheries_Fund", "evidence": "The fund for fisheries in 1990",
+                            "type": "Asset", "is_a": "Fund", "kind": "individual", "description": ""})
     events = attach_provenance(onto, ART["chunk_text"])
-    assert [e["code"] for e in events] == ["evidence_unverified"]
+    assert [e["code"] for e in events] == ["evidence_repaired", "evidence_unverified"]
     assert events[0]["before"].startswith("The Council")
+    assert onto["classes"][0]["evidence"] == events[0]["after"] and "Commission" in events[0]["after"]
 
 
 def test_normalisation_keeps_provenance_and_logs_before_after():

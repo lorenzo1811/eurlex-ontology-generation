@@ -216,9 +216,17 @@ def attach_provenance(onto: dict, text: str, *, celex: str | None = None,
     kw = {"celex": celex, "chunk_id": chunk_id, "segments": segments}
 
     def note(code: str, target: str, element: dict, match: str) -> None:
-        if match in ("inferred", "none") and str(element.get("evidence") or "").strip():
-            events.append(change("evidence_unverified", f"quote not in text; {match}",
-                                 target=target, before=element.get("evidence")))
+        quote = str(element.get("evidence") or "").strip()
+        if match == "inferred" and quote:
+            # the LLM's quote is not in the text, but the element's own words point to a
+            # sentence: that sentence becomes the evidence (repaired, not just flagged)
+            new = element["source"].get("quote", "")
+            events.append(change("evidence_repaired", "quote not in text; sentence found from the element's words",
+                                 target=target + ".evidence", before=quote, after=new))
+            element["evidence"] = new
+        elif match == "none" and quote:
+            events.append(change("evidence_unverified", "quote not in text and no sentence supports it",
+                                 target=target, before=quote))
         elif match == "none":
             events.append(change(code, "no sentence of the chunk supports it", target=target))
 

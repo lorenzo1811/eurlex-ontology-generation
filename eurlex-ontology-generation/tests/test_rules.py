@@ -115,6 +115,29 @@ def test_rules_pass_skips_recitals_and_disabled_config(monkeypatch):
                                      llm_backend={}, model="m", temperature=0) == []
 
 
+def test_a_failing_chunk_does_not_fail_the_batch(monkeypatch):
+    calls = []
+
+    def flaky_chat(backend, model, system, user, temperature, **kw):
+        calls.append((temperature, kw.get("num_ctx"), kw.get("max_tokens")))
+        if "Estonia" in user:
+            raise TimeoutError("ollama did not answer")
+        if len(calls) == 2:  # noqa: PLR2004
+            return LLMResult('["not an object"]', "length", 0, 0)    # retried
+        return LLMResult(json.dumps(empty_ontology()), "stop", 0, 0)
+
+    monkeypatch.setattr(gen_nodes, "llm_chat", flaky_chat)
+    chunks = pd.DataFrame([{"chunk_id": "a_1", "CELEX": "a", "chunk_text": "§ Text\nEstonia applied."},
+                           {"chunk_id": "b_1", "CELEX": "b", "chunk_text": "§ Text\nThe Fund pays."}])
+    out = gen_nodes.generate_partial_ontologies(
+        chunks, 0, "m", 0.1, "sys", "{text}", True, {"max_workers": 1}, num_ctx=8192, num_predict=3072)
+    failed = load_events(out.loc[0, "change_log"])
+    assert [e["code"] for e in failed] == ["generation_failed"] and "TimeoutError" in failed[0]["detail"]
+    assert json.loads(out.loc[1, "ontology"])["rights_model"] == empty_ontology()["rights_model"]
+    assert all(c[1:] == (8192, 3072) for c in calls)
+    assert calls[-1][0] > calls[-2][0] or len({c[0] for c in calls}) > 1     # retried warmer
+
+
 def test_generation_runs_the_rules_pass_and_keeps_provenance(monkeypatch):
     main = empty_ontology()
     main["classes"] = [{"name": "Commission", "type": "Party", "is_a": "EUInstitution", "kind": "individual",

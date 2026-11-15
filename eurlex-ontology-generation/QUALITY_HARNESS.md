@@ -84,6 +84,33 @@ ontology at once leaves most rule lists empty, and labels the model invents
 - Generation and revision templates show one example per list, the prompt maps
   modal verbs to lists, and `permission_duty_conflict` keeps both rules.
 
+### 0d. Repair instead of delete
+The cleanup and the normaliser removed a rule whose action is not in the text,
+a constraint whose date / amount / currency is not in the text and an example
+whose value is not in the text. `utils/repair.py` (`Repairer`, configured once
+in `conf/base/globals.yml: repair`, used by generation and revision) now tries,
+in order:
+1. deterministic repair from the text: spelling variants of the label
+   (fulfillment -> fulfilment, -ize/-ise, -or/-our), a vocabulary synonym of the
+   verb used in the rule's sentence (whole words only), or the label rebuilt
+   from an active deontic sentence (verb after "shall"/"may" + object); the only
+   date / amount of the rule's sentence, the year, the currency the text names;
+   the example value written differently in the text;
+2. an LLM check (gemma3:4b, `repair.llm`): element + surrounding sentences ->
+   `correct` with value and quote, or `remove`; kept only if both are found in
+   the text and the repaired rule passes the grounding check;
+3. removal, logged as before.
+Repairs are events `rule_action_repaired`, `constraint_value_repaired`,
+`example_value_repaired`, `evidence_repaired` (actor `normalizer`, or
+`llm_reviewer` for the LLM step), with before/after. Removals that lose content
+(`REVIEW_QUEUE_CODES`: ungrounded rules/constraints/examples, rules from
+recitals, unverifiable evidence, LLM-reviser deletions, failed generations) are
+also appended to `data/08_reporting/removed_items/part_XXX.csv` with status
+`to_review`. On the 14 rules removed in the phase-3 run, the deterministic step
+alone recovers 5 (e.g. monitor_fulfillment -> monitor_fulfilment, grant_disbursement
+-> suspend_disbursement); the rest goes to the LLM step. `batch_report.py`
+reports repaired vs removed.
+
 ### 1. Inconsistent typing
 | Layer | Where | What it does |
 |---|---|---|

@@ -1,8 +1,9 @@
 import json
+import logging
 import re
-import pandas as pd
-
 from pathlib import Path
+
+import pandas as pd
 
 from ...utils.changelog import change, stamp
 from ...utils.eurlex_structure import NON_BINDING, section_of
@@ -13,10 +14,13 @@ from ...utils.ontology_cleanup import (
     footnote_share,
 )
 from ...utils.ontology_schema import build_ontology_model
-from ...utils.persist import append_dedup_csv
+from ...utils.persist import append_dedup_csv, persist_removed_items
 from ...utils.provenance import attach_provenance
-from .rules_pass import run_rules_pass
+from ...utils.repair import build_repairer
 from ...utils.vocabulary import render_prompt
+from .rules_pass import run_rules_pass
+
+logger = logging.getLogger(__name__)
 
 
 # Load only the partition containing the requested batch.
@@ -143,11 +147,17 @@ def generate_partial_ontologies(
     cleanup_candidates: bool = True,
     non_binding_note: str | None = None,
     rules_pass: dict | None = None,
+    num_ctx: int | None = None,
+    num_predict: int | None = None,
+    max_attempts: int = 2,
+    repair: dict | None = None,
 ) -> pd.DataFrame:
 
     # The system prompt carries the controlled vocabulary; render it once.
     rendered_system_prompt = render_prompt(system_prompt, vocabulary_path)
     schema_model = build_ontology_model(vocabulary_path) if structured_output else None
+    # corrects unsupported values before the cleanup would remove them (utils/repair.py)
+    repairer = build_repairer(repair, vocabulary_path)
 
     # Helper closure to process a single chunk row through the LLM pipeline
     def _generate(row) -> dict:
@@ -174,15 +184,35 @@ def generate_partial_ontologies(
             label = "recitals" if section == "recital" else section
             user_prompt += "\n\n" + non_binding_note.replace("{section}", label)
 
-        # Query local LLM via helper utility. With structured_output the JSON
-        # schema (enums for types, is_a, actions, operands, relations) is
-        # enforced by the decoder, not just requested in the prompt.
-        response = llm_chat(
-            llm_backend, model, rendered_system_prompt, user_prompt, temperature,
-            schema_model=schema_model,
-            json_mode=json_mode,
-        )
-        ontology_json = extract_json(response.content)
+        # Query the LLM. With structured_output the JSON schema (enums for types,
+        # is_a, actions, operands, relations) is enforced by the decoder. A failed
+        # or unparsable answer is retried a little warmer (at low temperature a
+        # loop repeats itself); if every attempt fails the chunk gets an empty
+        # ontology and a `generation_failed` event, instead of failing the batch.
+        ontology_json, failure = None, ""
+        for attempt in range(max_attempts):
+            try:
+                response = llm_chat(
+                    llm_backend, model, rendered_system_prompt, user_prompt,
+                    min(temperature + 0.3 * attempt, 0.9),
+                    schema_model=schema_model, json_mode=json_mode,
+                    num_ctx=num_ctx, max_tokens=num_predict,
+                )
+            except Exception as exc:  # timeouts, server errors after the client's retries
+                failure = f"attempt {attempt + 1}: {type(exc).__name__}: {str(exc)[:200]}"
+                logger.warning("chunk %s: generation %s", row["chunk_id"], failure)
+                continue
+            parsed = extract_json(response.content)
+            if isinstance(parsed, dict) and "error" not in parsed:
+                ontology_json = parsed
+                break
+            failure = (f"attempt {attempt + 1}: invalid JSON (done_reason={response.done_reason}, "
+                       f"{len(response.content or '')} chars)")
+            logger.warning("chunk %s: generation %s", row["chunk_id"], failure)
+        if ontology_json is None:
+            notes = [change("generation_failed", failure, actor="llm_generator", target="ontology")]
+            return {**base, "ontology": json.dumps(empty_ontology(), ensure_ascii=False),
+                    "cleanup_notes": json.dumps(notes), "change_log": stamped(notes)}
 
         # Checks against the source text, before the review sees the candidate (see utils/ontology_cleanup.py)
         # Second, narrow LLM call on the article sentences that state a rule the first
@@ -193,14 +223,14 @@ def generate_partial_ontologies(
                 rules_events = run_rules_pass(
                     ontology_json, chunk_text, rules_pass, llm_backend=llm_backend, model=model,
                     temperature=temperature, vocabulary_path=vocabulary_path,
-                    structured_output=structured_output)
+                    structured_output=structured_output, num_ctx=num_ctx, num_predict=num_predict)
             except Exception as exc:  # the main extraction is still usable
                 rules_events = [change("rules_pass_failed", str(exc)[:200], actor="llm_generator",
                                        target="rights_model")]
 
         notes: list = []
         if cleanup_candidates and "error" not in ontology_json:
-            ontology_json, notes = cleanup_ontology(ontology_json, chunk_text)
+            ontology_json, notes = cleanup_ontology(ontology_json, chunk_text, repairer=repairer)
         notes = rules_events + notes
         # Source of every class, rule and constraint: CELEX, chunk, article/paragraph,
         # act offsets and the quoted span (utils/provenance.py)
@@ -228,7 +258,8 @@ def persist_ontology_candidates(
     batch_id: int,
     batch_group_size: int,
     output_directory: str,
-) -> str:    
+    removed_items_directory: str | None = None,
+) -> str:
 
     # Identify target partition file group
     group_id = get_batch_group_id(
@@ -237,6 +268,8 @@ def persist_ontology_candidates(
     )
 
     output_path = Path(output_directory) / f"part_{group_id:03d}.csv"
+    # removals that could not be repaired go to a review queue (one row per event)
+    persist_removed_items(ontology_candidates, removed_items_directory, group_id)
 
     return append_dedup_csv(output_path, ontology_candidates)
 

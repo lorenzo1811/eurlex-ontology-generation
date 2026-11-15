@@ -154,6 +154,29 @@ def diff_ontologies(before: dict | None, after: dict | None, *, actor: str,
     return events
 
 
+# Removals a person should look at: content deleted because the text did not
+# support it (after repair failed) or deleted by the LLM reviser. Duplicates and
+# ODRL meta-model leakage are not listed: removing them loses nothing.
+REVIEW_QUEUE_CODES = {
+    "rule_ungrounded_dropped", "constraint_ungrounded_dropped", "example_dropped",
+    "rule_from_recital_dropped", "rule_dropped", "constraint_dropped", "evidence_unverified",
+    "llm_revision_removed", "generation_failed", "revision_failed_original_kept",
+}
+
+
+def removed_items(rows: Any, column: str = "change_log") -> list[dict]:
+    """Events of `rows` (a DataFrame with a change-log column) for the removed-items queue."""
+    out = []
+    if rows is None or column not in getattr(rows, "columns", []):
+        return out
+    for value in rows[column]:
+        for e in load_events(value):
+            if e.get("code") in REVIEW_QUEUE_CODES:
+                out.append({**e, "before": json.dumps(e.get("before"), ensure_ascii=False, default=str),
+                            "status": "to_review"})
+    return out
+
+
 def load_events(value: Any) -> list[dict]:
     """Events stored in a CSV cell (JSON list) -> list of dicts."""
     if isinstance(value, list):

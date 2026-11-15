@@ -4,6 +4,28 @@ from pathlib import Path
 import pandas as pd
 from filelock import FileLock
 
+from .changelog import removed_items
+
+REMOVED_ITEM_KEY = ["chunk_id", "stage", "round", "code", "target"]
+
+
+def persist_removed_items(rows: pd.DataFrame, directory: str | None, group_id: int) -> str | None:
+    """Append the removals a person should review (utils/changelog.REVIEW_QUEUE_CODES)
+    to <directory>/part_XXX.csv, one row per event, status 'to_review'."""
+    if not directory:
+        return None
+    items = removed_items(rows)
+    if not items:
+        return None
+    frame = pd.DataFrame(items)
+    for k in REMOVED_ITEM_KEY:
+        if k not in frame.columns:
+            frame[k] = ""
+    for col in ("after",):
+        if col in frame.columns:
+            frame[col] = frame[col].map(lambda v: v if isinstance(v, str) or v is None else str(v))
+    return append_dedup_csv(Path(directory) / f"part_{group_id:03d}.csv", frame, key=REMOVED_ITEM_KEY)
+
 
 # Append rows to a shared CSV, deduplicating by key. Safe with concurrent processes.
 # `key` may be a column name or a list of columns (e.g. ["chunk_id", "round"]).

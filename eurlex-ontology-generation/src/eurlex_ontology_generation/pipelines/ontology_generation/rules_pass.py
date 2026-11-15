@@ -47,7 +47,8 @@ def _parse(content: str) -> dict:
 
 def run_rules_pass(onto: dict, chunk_text: str, config: dict, *, llm_backend: dict, model: str,  # noqa: PLR0913
                    temperature: float, vocabulary_path: str | None = None,
-                   structured_output: bool = True) -> list[dict]:
+                   structured_output: bool = True, num_ctx: int | None = None,
+                   num_predict: int | None = None) -> list[dict]:
     """Add to `onto` (in place) the rules of the uncovered deontic sentences.
     Returns change events (actor llm_generator / normalizer)."""
     if not config or not config.get("enabled"):
@@ -68,7 +69,7 @@ def run_rules_pass(onto: dict, chunk_text: str, config: dict, *, llm_backend: di
                          sentences=listing)
     response = llm_chat(llm_backend, model, system, user, temperature,
                         schema_model=build_rules_model(vocabulary_path) if structured_output else None,
-                        json_mode=True)
+                        json_mode=True, num_ctx=num_ctx, max_tokens=num_predict)
     answer = _parse(response.content)
 
     events: list[dict] = []

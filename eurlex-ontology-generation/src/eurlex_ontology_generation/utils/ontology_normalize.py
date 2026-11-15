@@ -83,16 +83,19 @@ def type_entity(name: str, description: str, vocab: Vocabulary, gazetteer: Gazet
 def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                              gazetteer: Gazetteer | None = None,
                              source_text: str | None = None,
-                             original: dict | None = None) -> tuple[dict, list[dict]]:
+                             original: dict | None = None,
+                             repairer=None) -> tuple[dict, list[dict]]:
     vocab = vocab or load_vocabulary()
     gazetteer = gazetteer or load_gazetteer()
     changes: list[dict] = []
 
     # Checks against the source text (repeated rules, actions and examples that are not in the
     # text, descriptions cut by the length cap, lost `provision`). `original` is the version
-    # before the revision: it is used to restore `provision`.
+    # before the revision: it is used to restore `provision`. With a `repairer`
+    # (utils/repair.py) unsupported values are corrected first, removed only otherwise.
     if source_text:
-        onto, cleanup_notes = cleanup_ontology(onto, source_text, original=original)
+        onto, cleanup_notes = cleanup_ontology(onto, source_text, original=original,
+                                               repairer=repairer)
         changes.extend(cleanup_notes)
 
     def note(code: str, detail: str, target: str | None = None, before=None, after=None) -> None:
@@ -194,6 +197,16 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                 # drop values that have no trace in the source text (invented dates, amounts, currencies)
                 if source_text:
                     reason = constraint_is_ungrounded(sc, source_text)
+                    fixed = repairer.repair_constraint(sc, rule, source_text, reason) \
+                        if reason and repairer is not None else None
+                    if fixed:
+                        changes.append(change(
+                            "constraint_value_repaired", f"{fixed[1]} ({reason})",
+                            actor="llm_reviewer" if fixed[1] == "llm" else "normalizer",
+                            target=target + f".constraints[{sc.get('left_operand')}]",
+                            before={k: sc.get(k) for k in ("right_operand", "unit")},
+                            after={k: fixed[0].get(k) for k in ("right_operand", "unit")}))
+                        sc, reason = fixed[0], None
                     if reason:
                         note("constraint_ungrounded_dropped",
                              f"{sc.get('left_operand')} {sc.get('operator')} "

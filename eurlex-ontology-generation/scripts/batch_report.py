@@ -91,14 +91,25 @@ def _provenance(ontologies) -> dict:
     return {k: dict(v.most_common()) for k, v in out.items()}
 
 
+REMOVAL_CODES = {"rule_ungrounded_dropped", "constraint_ungrounded_dropped", "example_dropped",
+                 "evidence_unverified"}
+
+
 def _change_log(series) -> dict:
     by_actor, by_code = Counter(), Counter()
+    repaired, removed = Counter(), Counter()
     for value in series.dropna():
         for e in _load(value) or []:
             if isinstance(e, dict):
                 by_actor[e.get("actor", "?")] += 1
                 by_code[f"{e.get('actor', '?')}:{e.get('code', '?')}"] += 1
-    return {"by_actor": dict(by_actor.most_common()), "by_code": dict(by_code.most_common())}
+                code = e.get("code", "")
+                if code.endswith("_repaired"):
+                    repaired[f"{code} ({'llm' if e.get('actor') == 'llm_reviewer' else 'code'})"] += 1
+                elif code in REMOVAL_CODES:
+                    removed[code] += 1
+    return {"by_actor": dict(by_actor.most_common()), "by_code": dict(by_code.most_common()),
+            "repaired": dict(repaired.most_common()), "removed": dict(removed.most_common())}
 
 
 def _canon(onto) -> str:

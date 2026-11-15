@@ -8,6 +8,23 @@
 # in these files. To override locally without committing, copy a parameters
 # file to conf/local/ and change `llm_backend` there.
 
+# Repair instead of delete (utils/repair.py), shared by generation and revision:
+# values the text does not support are corrected deterministically from the
+# text, then (llm.enabled) checked by a small model that answers correct/remove;
+# a correction is kept only if it is found in the text. What cannot be repaired
+# is removed, logged, and listed in removed_items_directory for a person.
+repair:
+  enabled: true
+  llm:
+    enabled: true
+    model: gemma3:4b
+    llm_backend:
+      provider: ollama
+    temperature: 0.0
+    num_ctx: 4096
+    num_predict: 256
+removed_items_directory: data/08_reporting/removed_items
+
 llm_backends:
   # Ollama on this machine (default, previous behaviour)
   local:
