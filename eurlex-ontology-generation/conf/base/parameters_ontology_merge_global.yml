@@ -18,3 +18,7 @@ ontology_merge_global:
   # are individually "cleaner" and a stricter threshold reduces the risk
   # of over-merging.
   similarity_threshold: 0.88
+
+  # Coverage of the global merge (see parameters_ontology_merge_partition.yml).
+  fail_on_silent_loss: true
+  coverage_path: data/08_reporting/merge_coverage/global.json

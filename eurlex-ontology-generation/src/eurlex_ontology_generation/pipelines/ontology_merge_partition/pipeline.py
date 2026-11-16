@@ -29,6 +29,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_merge_partition.embedding_model",
                     "params:ontology_merge_partition.similarity_threshold",
                     "params:ontology_merge_partition.embedding_backend",
+                    "params:ontology_merge_partition.fail_on_silent_loss",
                 ],
                 outputs=[
                     "partition_merged_ontology",
@@ -47,6 +48,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_merge_partition.output_directory",
                     "params:ontology_merge_partition.provenance_directory",
                     "params:ontology_merge_partition.cluster_report_directory",
+                    "params:ontology_merge_partition.coverage_directory",
                 ],
                 outputs="partition_merge_path",
                 name="persist_partition_merge_node",

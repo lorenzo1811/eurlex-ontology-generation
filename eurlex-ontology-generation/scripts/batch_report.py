@@ -97,7 +97,7 @@ REMOVAL_CODES = {"rule_ungrounded_dropped", "constraint_ungrounded_dropped", "ex
 
 def _change_log(series) -> dict:
     by_actor, by_code = Counter(), Counter()
-    repaired, removed = Counter(), Counter()
+    repaired, removed, llm_step = Counter(), Counter(), Counter()
     for value in series.dropna():
         for e in _load(value) or []:
             if isinstance(e, dict):
@@ -108,8 +108,18 @@ def _change_log(series) -> dict:
                     repaired[f"{code} ({'llm' if e.get('actor') == 'llm_reviewer' else 'code'})"] += 1
                 elif code in REMOVAL_CODES:
                     removed[code] += 1
+                    # outcome of the Repairer's LLM step, written by ontology_cleanup/normalize
+                    m = _LLM_OUTCOME.search(str(e.get("detail", "")))
+                    if m:
+                        llm_step[m.group(1)] += 1
+                if code.endswith("_repaired") and e.get("actor") == "llm_reviewer":
+                    llm_step["llm_accepted"] += 1
     return {"by_actor": dict(by_actor.most_common()), "by_code": dict(by_code.most_common()),
-            "repaired": dict(repaired.most_common()), "removed": dict(removed.most_common())}
+            "repaired": dict(repaired.most_common()), "removed": dict(removed.most_common()),
+            "repair_llm_step": dict(llm_step.most_common())}
+
+
+_LLM_OUTCOME = re.compile(r"; (llm_off|llm_error:\w+|remove|correct|llm_correct_not_verified)\)?$")
 
 
 def _canon(onto) -> str:
@@ -231,11 +241,14 @@ def _entity_keys(onto) -> dict:
     return keys
 
 
-def coverage_report(source_ontos, refined) -> dict:
+def coverage_report(source_ontos, refined, merge_coverages=None) -> dict:
     """Source class names whose merge key is absent from the refined ontology.
 
     Names merged by embedding similarity under a different key show up here
-    too, so this is an upper bound on what was lost, to be checked by hand.
+    too, so this is an upper bound on what was lost. With the merge coverage
+    files (data/08_reporting/merge_coverage/*.json) every such name is explained:
+    dropped with a reason, or merged into a canonical name that is in the refined
+    ontology; the rest are `unexplained`.
     """
     target = _entity_keys(refined)
     source = {}
@@ -243,13 +256,36 @@ def coverage_report(source_ontos, refined) -> dict:
         source.update(_entity_keys(onto))
     missing = sorted(name for key, name in source.items() if key not in target)
     rm = refined.get("rights_model") or {}
-    return {
+    out = {
         "source_concepts": len(source),
         "refined_concepts": len({v for v in target.values()}),
         "source_keys_not_found": len(missing),
         "not_found": missing,
         "refined_rules": {k: len(rm.get(k) or []) for k in RULE_KINDS},
     }
+    if merge_coverages:
+        fate: dict[str, dict] = {}
+        for cov in merge_coverages:
+            for m in cov.get("concept_mapping") or []:
+                if isinstance(m.get("name"), str) and (m["name"] not in fate or m["status"] != "dropped"):
+                    fate[m["name"]] = m
+        explained, unexplained = {}, []
+        for name in missing:
+            m = fate.get(name)
+            canonical = m and m.get("canonical")
+            targets = canonical if isinstance(canonical, list) else [canonical]
+            if m and m["status"] == "dropped":
+                explained[name] = f"dropped: {m['reason']}"
+            elif m and targets and all(t and group_key("class", t) in target for t in targets):
+                explained[name] = f"{m['status']} into {', '.join(targets)}"
+            else:
+                unexplained.append(name)
+        out["not_found_explained"] = explained
+        out["not_found_unexplained"] = unexplained
+        out["merge"] = [{k: cov.get(k) for k in ("source_label", "source_concepts", "mapped", "split",
+                                                 "dropped", "coverage", "dropped_by_reason", "rules")}
+                        | {"silent_losses": len(cov.get("silent_losses") or [])} for cov in merge_coverages]
+    return out
 
 
 def main() -> None:
@@ -258,6 +294,8 @@ def main() -> None:
     p.add_argument("--reviews")
     p.add_argument("--revisions")
     p.add_argument("--refined", help="refined (or merged) ontology JSON")
+    p.add_argument("--merge-coverage", nargs="*", default=[],
+                   help="merge coverage JSON files (data/08_reporting/merge_coverage/*.json)")
     p.add_argument("--batch-id", type=int, help="keep only rows of this batch")
     p.add_argument("--out", help="write the report as JSON here")
     args = p.parse_args()
@@ -278,7 +316,8 @@ def main() -> None:
         source = _latest_round(revisions) if revisions is not None else candidates
         if source is not None:
             ontos = [o for o in (_load(v) for v in source["ontology"]) if isinstance(o, dict)]
-            report["merge_coverage"] = coverage_report(ontos, refined)
+            coverages = [json.loads(Path(f).read_text(encoding="utf-8")) for f in args.merge_coverage]
+            report["merge_coverage"] = coverage_report(ontos, refined, coverages)
 
     text = json.dumps(report, indent=2, ensure_ascii=False)
     if args.out:

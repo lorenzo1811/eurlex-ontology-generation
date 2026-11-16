@@ -28,3 +28,10 @@ ontology_merge_partition:
   # too high -> obvious duplicates (e.g. "Commission" vs "European
   # Commission") stay separate.
   similarity_threshold: 0.86
+
+  # Coverage of the merge: every source concept is mapped to a canonical one or
+  # dropped with a recorded reason (date, amount, provision reference, ...).
+  # Report (with the full concept mapping) per partition in coverage_directory.
+  # true: the run fails when a concept is lost without a reason.
+  fail_on_silent_loss: true
+  coverage_directory: data/08_reporting/merge_coverage

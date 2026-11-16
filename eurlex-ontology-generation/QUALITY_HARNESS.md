@@ -139,6 +139,47 @@ reports repaired vs removed.
 - Revisions are stored per `(chunk_id, round)`; the re-review reads the round it
   judges, the merge and `batch_report.py` the latest round of each chunk.
 
+### 0f. Merge coverage: no silent losses
+- Every class mention of the merged ontologies gets a fate in a
+  `concept_mapping` (`utils/ontology_merge_common/assembly.py`): `mapped` to a
+  canonical name, `split` into known parts (composite names), or `dropped` with a
+  reason. `class_disposition` (`entity_resolution.py`) gives the reason:
+  values and references are not concepts (`date_value`, `amount_value`,
+  `provision_reference`, `metamodel_leakage`, placeholders); acts, companies and
+  other named things become **individuals** instead of being rejected
+  (`legal_act_reference` → `is_a: LegalAct`, `organisation_name` → `is_a:
+  Undertaking`, `instance_name`). Before, `Eesti Energia AS`, `Decision (EU)
+  2016/2371`, `EGF/2016/003` were silently filtered out.
+- Act titles share one key and short name (`DECISION (EU) 2016/1858 OF THE
+  EUROPEAN PARLIAMENT ...` → `Decision (EU) 2016/1858`); named individuals merge
+  by exact key only (embeddings would merge `Decision 2016/2371` and `2016/2099`).
+- Fixes at the loss points: gazetteer/alias canonicals used as party or asset
+  (`Commission` → `European_Commission`) and undeclared rule parties are defined
+  by the merge (`defined_by_merge`); a rule whose asset does not resolve keeps
+  `asset: None` (`rule_asset_cleared`) instead of being dropped; rules that
+  collide keep every `action_label` and `provision` (`action_labels`,
+  `provisions`, exported as repeated `eo:actionLabel` / `eo:provision`);
+  dropped constraints, patterns, examples and relationships are counted and
+  logged with a reason.
+- Change-log events with actor `merger` (`concept_dropped`, `class_merged_into`,
+  `class_defined_from_alias`, `class_defined_from_rule`, `individual_from_name`,
+  `rule_merged`, `rule_asset_cleared`, `constraint_dropped`, ...) are in the
+  merge provenance file (`events`).
+- Report: `data/08_reporting/merge_coverage/part_XXX.json` and `global.json`
+  (coverage, dropped concepts with reason, variants, individuals from names,
+  rules in/out, full `concept_mapping`). A *silent loss* is a mapped concept
+  whose canonical is missing from the merged ontology or a drop without a
+  decision behind it; `fail_on_silent_loss: true` fails the run.
+  `batch_report.py --merge-coverage <files>` explains each concept not found in
+  the refined ontology (`not_found_explained` / `not_found_unexplained`).
+- On the phase-5 revisions of batches 49–53: 85 concepts, 84 mapped, 1 dropped
+  (`11 October 2016`, `date_value`), 0 silent losses; not found after
+  refinement 9 → 1; rules unchanged (18 / 8 / 13).
+- Repair LLM step: `Repairer.last_llm` records the outcome of its LLM step
+  (`llm_off`, `llm_error:<type>`, `remove`, `llm_correct_not_verified`,
+  `llm_accepted`); it is appended to the removal event detail and counted by
+  `batch_report.py` (`repair_llm_step`), since errors were swallowed before.
+
 ### 1. Inconsistent typing
 | Layer | Where | What it does |
 |---|---|---|

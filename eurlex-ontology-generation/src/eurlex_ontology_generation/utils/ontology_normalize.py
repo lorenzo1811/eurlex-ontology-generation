@@ -208,9 +208,10 @@ def normalize_chunk_ontology(onto: dict, vocab: Vocabulary | None = None,
                             after={k: fixed[0].get(k) for k in ("right_operand", "unit")}))
                         sc, reason = fixed[0], None
                     if reason:
+                        llm = f"; {repairer.last_llm}" if repairer is not None and repairer.last_llm else ""
                         note("constraint_ungrounded_dropped",
                              f"{sc.get('left_operand')} {sc.get('operator')} "
-                             f"{sc.get('right_operand')}: {reason}", target, before=sc)
+                             f"{sc.get('right_operand')}: {reason}{llm}", target, before=sc)
                         continue
                 if "name" in c and "left_operand" not in c:
                     note("constraint_structured", f"{c.get('name')} -> {sc['left_operand']} {sc['operator']}",

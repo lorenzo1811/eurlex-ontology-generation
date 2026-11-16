@@ -23,6 +23,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_merge_global.embedding_model",
                     "params:ontology_merge_global.similarity_threshold",
                     "params:ontology_merge_global.embedding_backend",
+                    "params:ontology_merge_global.fail_on_silent_loss",
                 ],
                 outputs=[
                     "global_merged_ontology",
@@ -40,6 +41,7 @@ def create_pipeline(**kwargs) -> Pipeline:
                     "params:ontology_merge_global.output_path",
                     "params:ontology_merge_global.provenance_path",
                     "params:ontology_merge_global.cluster_report_path",
+                    "params:ontology_merge_global.coverage_path",
                 ],
                 outputs="global_merge_path",
                 name="persist_global_merge_node",

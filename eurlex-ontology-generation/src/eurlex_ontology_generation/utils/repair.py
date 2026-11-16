@@ -26,6 +26,7 @@ and codes `*_repaired`; the method is in `detail`.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Callable
 from typing import Literal
@@ -41,6 +42,8 @@ from .ontology_grounding import (
 )
 from .provenance import infer_span, locate_quote, sentence_spans
 from .vocabulary import OTHER_ACTION, Vocabulary, load_vocabulary, split_identifier
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------- spelling
 _VARIANTS = (("ll", "l"), ("l", "ll"), ("ize", "ise"), ("ise", "ize"), ("yze", "yse"), ("yse", "yze"),
@@ -197,6 +200,10 @@ class Repairer:
         self.vocab = vocab or load_vocabulary()
         self.llm = llm
         self.context_chars = context_chars
+        # outcome of the LLM step of the last repair_* call, written into the removal
+        # event when the element is removed: llm_off, llm_error:<type>, remove,
+        # llm_correct_not_verified, llm_accepted (None: the LLM step was not reached)
+        self.last_llm: str | None = None
         # single-word verbs of the vocabulary: skipped when looking for an object
         self._verbs = {s for spec in self.vocab.actions.values() for s in spec.get("synonyms", [])
                        if "_" not in s} | set(self.vocab.actions)
@@ -223,6 +230,7 @@ class Repairer:
     def _ask(self, what: str, element: dict, problem: str, expected: str, text: str,  # noqa: PLR0913
              span: tuple[int, int] | None) -> RepairDecision | None:
         if self.llm is None:
+            self.last_llm = "llm_off"
             return None
         user = REPAIR_USER.format(context=self._context(text, span), what=what,
                                   element=json.dumps(element, ensure_ascii=False)[:800],
@@ -230,15 +238,20 @@ class Repairer:
         try:
             raw = self.llm(REPAIR_SYSTEM, user, RepairDecision)
             data = json.loads(re.sub(r"^```(?:json)?\s*|```$", "", (raw or "").strip(), flags=re.M))
-            return RepairDecision.model_validate(data)
-        except Exception:  # an unusable answer is the same as no answer
+            decision = RepairDecision.model_validate(data)
+        except Exception as exc:  # an unusable answer is the same as no answer, but it is recorded
+            self.last_llm = f"llm_error:{type(exc).__name__}"
+            logger.warning("Repair LLM call failed (%s: %s)", type(exc).__name__, str(exc)[:200])
             return None
+        self.last_llm = decision.decision
+        return decision
 
     # ------------------------------------------------------------ actions
     def repair_action(self, rule: dict, text: str, why: str,
                       ungrounded: Callable[[dict, str], str | None]) -> tuple[dict, str] | None:
         """(repaired rule, method) or None. `ungrounded(rule, text)` is the grounding
         test the repaired rule must pass (ontology_cleanup.action_ungrounded_reason)."""
+        self.last_llm = None
         label = str(rule.get("action_label") or rule.get("action") or "")
         words = split_identifier(label)
         if not words:
@@ -286,9 +299,11 @@ class Repairer:
                              f"action_label '{label}': {why}",
                              "the action as worded in the text, snake_case verb_object (e.g. inform_council)",
                              text, span)
-        if decision and decision.decision == "correct" and locate_quote(decision.evidence, text):
-            out = accept(split_identifier(decision.value), "llm")
+        if decision and decision.decision == "correct":
+            self.last_llm = "llm_correct_not_verified"
+            out = accept(split_identifier(decision.value), "llm") if locate_quote(decision.evidence, text) else None
             if out:
+                self.last_llm = "llm_accepted"
                 return out[0], "llm"
         return None
 
@@ -296,6 +311,7 @@ class Repairer:
     def repair_constraint(self, constraint: dict, rule: dict, text: str,
                           why: str) -> tuple[dict, str] | None:
         """(repaired constraint, method) or None."""
+        self.last_llm = None
         span = self._sentence(rule, [rule.get("action_label"), rule.get("asset")], text)
         sentence = text[span[0]:span[1]] if span else text
         left = constraint.get("left_operand")
@@ -333,9 +349,11 @@ class Repairer:
                     return out
         decision = self._ask("ODRL constraint", constraint, why,
                              f"the value of '{left}' as stated in the text (dates as YYYY-MM-DD)", text, span)
-        if decision and decision.decision == "correct" and locate_quote(decision.evidence, text):
-            out = accept({**constraint, "right_operand": decision.value.strip()}, "llm")
+        if decision and decision.decision == "correct":
+            self.last_llm = "llm_correct_not_verified"
+            out = accept({**constraint, "right_operand": decision.value.strip()}, "llm")                 if locate_quote(decision.evidence, text) else None
             if out:
+                self.last_llm = "llm_accepted"
                 return out
         return None
 

@@ -1,8 +1,12 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pandas as pd
 
+from eurlex_ontology_generation.pipelines.ontology_merge_partition.nodes import (
+    attach_coverage,
+    persist_coverage,
+)
 from eurlex_ontology_generation.utils.ontology_merge_common.assembly import (
     assemble_merged_ontology,
     validate_merged_ontology,
@@ -51,6 +55,7 @@ def merge_global(
     embedding_model: str,
     similarity_threshold: float,
     embedding_backend: dict | None = None,
+    fail_on_silent_loss: bool = True,
 ) -> tuple[dict, dict, pd.DataFrame]:
     entities = extract_entities(partition_merges)
     entities_with_clusters = cluster_entities(entities, embedding_model, similarity_threshold, embedding_backend)
@@ -61,18 +66,22 @@ def merge_global(
     )
     provenance["n_partitions_included"] = len(partition_merges)
     provenance["validation_issues"] = validate_merged_ontology(merged)
+    attach_coverage(merged, provenance, fail_on_silent_loss)
 
     return merged, provenance, cluster_report
 
 
-def persist_global_merge(
+def persist_global_merge(  # noqa: PLR0913
     merged_ontology: dict,
     provenance: dict,
     cluster_report: pd.DataFrame,
     output_path: str,
     provenance_path: str,
     cluster_report_path: str,
+    coverage_path: str | None = None,
 ) -> str:
+    if coverage_path:
+        persist_coverage(provenance, Path(coverage_path))
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     Path(output_path).write_text(
         json.dumps(merged_ontology, ensure_ascii=False, indent=2), encoding="utf-8"

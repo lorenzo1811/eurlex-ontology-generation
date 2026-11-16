@@ -385,6 +385,10 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
                               ("provision", eo.provision)):
                 if r.get(key):
                     g.add((node, prop, Literal(str(r[key]))))
+            # rules merged from several chunks keep every label and provision
+            for key, prop in (("action_labels", eo.actionLabel), ("provisions", eo.provision)):
+                for v in r.get(key) or []:
+                    g.add((node, prop, Literal(str(v))))
             _support(g, eo, node, r.get("support"))
             evidence(node, r)
             for c in r.get("constraints") or []:

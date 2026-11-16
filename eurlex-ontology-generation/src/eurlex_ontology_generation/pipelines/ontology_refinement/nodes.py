@@ -289,6 +289,12 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                                                      MAX_EVIDENCE)
                 if rule.get("provision"):
                     entry.setdefault("provision", rule["provision"])
+                # every label / provision of rules that became identical is kept
+                for field, values in (("action_labels", rule.get("action_labels") or [rule.get("action_label")]),
+                                      ("provisions", rule.get("provisions") or [rule.get("provision")])):
+                    for v in values:
+                        if v and v not in entry.setdefault(field, []):
+                            entry[field].append(v)
                 by_key = {(c["left_operand"], c["operator"], c["right_operand"]): c
                           for c in entry["constraints"]}
                 for c in constraints:
@@ -362,7 +368,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
         for k in ("iri", "member_state", "related_individual", "wikidata"):
             if t.get(k) is not None:
                 record[k] = t[k]
-        if len(e["variants"]) > 1:
+        if len(e["variants"]) > 1 or set(e["variants"]) - {name}:     # merged or renamed
             record["merged_from"] = sorted(set(e["variants"]))
         if e.get("provenance"):
             record["provenance"] = e["provenance"]
@@ -405,6 +411,7 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
                                      target=f"rights_model.{k}[{rid}]",
                                      before={k2: r.get(k2) for k2 in ("action", "party", "asset")}))
                 continue
+            r = {k: v for k, v in r.items() if k not in ("action_labels", "provisions") or len(v) > 1}
             out.append({**r, "id": rid, "sources": sorted(r.get("sources") or [])})
         rights_model[k] = out
 

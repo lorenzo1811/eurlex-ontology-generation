@@ -1,10 +1,12 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pandas as pd
 
 from eurlex_ontology_generation.utils.ontology_merge_common.assembly import (
     assemble_merged_ontology,
+    check_coverage,
+    merge_coverage,
     validate_merged_ontology,
 )
 from eurlex_ontology_generation.utils.ontology_merge_common.entity_resolution import (
@@ -61,12 +63,13 @@ def load_partition_revisions(part_id: int, revisions_directory: str,
 
 # Merge every ontology in this partition into a single one: extract
 # entities -> embed -> cluster -> canonicalize -> deterministic assembly.
-def merge_partition(
+def merge_partition(  # noqa: PLR0913
     revisions: pd.DataFrame,
     part_id: int,
     embedding_model: str,
     similarity_threshold: float,
     embedding_backend: dict | None = None,
+    fail_on_silent_loss: bool = True,
 ) -> tuple[dict, dict, pd.DataFrame]:
     entities = extract_entities(revisions)
     entities_with_clusters = cluster_entities(entities, embedding_model, similarity_threshold, embedding_backend)
@@ -76,15 +79,39 @@ def merge_partition(
         revisions, canonical_map, source_label=f"partition_{part_id:03d}"
     )
     provenance["validation_issues"] = validate_merged_ontology(merged)
+    attach_coverage(merged, provenance, fail_on_silent_loss)
 
     return merged, provenance, cluster_report
+
+
+# Coverage of the merge (every source concept -> canonical, or dropped with a reason).
+# The full report, with the concept mapping, goes to its own file (see
+# persist_coverage); the provenance keeps the summary.
+def attach_coverage(merged: dict, provenance: dict, fail_on_silent_loss: bool) -> dict:
+    coverage = merge_coverage(merged, provenance)
+    coverage["concept_mapping"] = provenance.pop("concept_mapping", [])
+    provenance["merge_coverage"] = coverage
+    check_coverage(coverage, fail_on_silent_loss)
+    return coverage
+
+
+def persist_coverage(provenance: dict, path: Path) -> None:
+    coverage = provenance.pop("merge_coverage", None)
+    if coverage is None:
+        return
+    provenance["merge_coverage_summary"] = {
+        k: coverage[k] for k in ("source_concepts", "mapped", "split", "dropped", "coverage",
+                                 "dropped_by_reason", "rules")}
+    provenance["merge_coverage_path"] = Path(path).as_posix()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # Persist the partition-level merged ontology, its provenance report and
 # the cluster report (one row per canonical entity, useful to audit
 # which chunk-level names were merged together and tune the similarity
 # threshold).
-def persist_partition_merge(
+def persist_partition_merge(  # noqa: PLR0913
     merged_ontology: dict,
     provenance: dict,
     cluster_report: pd.DataFrame,
@@ -92,7 +119,10 @@ def persist_partition_merge(
     output_directory: str,
     provenance_directory: str,
     cluster_report_directory: str,
+    coverage_directory: str | None = None,
 ) -> str:
+    if coverage_directory:
+        persist_coverage(provenance, Path(coverage_directory) / f"part_{part_id:03d}.json")
     onto_path = Path(output_directory) / f"part_{part_id:03d}.json"
     onto_path.parent.mkdir(parents=True, exist_ok=True)
     onto_path.write_text(

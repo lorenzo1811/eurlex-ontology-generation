@@ -40,6 +40,68 @@ INSTANCE_NAME_PATTERNS = [
 ]
 INSTANCE_DESC_PATTERN = re.compile(r"\b(company|airline|enterprise|suppliers?)\b", re.I)
 
+# What an instance-shaped name is (class_disposition). Values (dates, amounts) and
+# references to provisions are not concepts and are dropped with that reason; acts,
+# companies and other named things become individuals instead of being lost.
+_MONTHS = r"(January|February|March|April|May|June|July|August|September|October|November|December)"
+DATE_NAME = re.compile(rf"^\s*(\d{{1,2}}[\s_]+)?{_MONTHS}([\s_]+\d{{1,2}},?)?([\s_]+(19|20)\d{{2}})?\s*$"
+                       rf"|^\s*(19|20)\d{{2}}\s*$|^\s*\d{{1,2}}[./-]\d{{1,2}}[./-]\d{{2,4}}\s*$", re.I)
+AMOUNT_NAME = re.compile(r"^\s*(EUR|ECU|€)?[\s_]*[\d.,\s]+[\s_]*(EUR|ECU|€|%|million|billion|MHz)?\s*$"
+                         r"|^\s*(EUR|ECU|€)[\s_]*\d|\d[\s_]*(EUR|ECU|€|MHz)\b", re.I)
+PROVISION_REF_NAME = re.compile(r"^\s*(article|recital|annex|paragraph|point)[\s_]*\d", re.I)
+LEGAL_ACT_NAME = re.compile(
+    r"\b(Regulation|Directive|Decision)\b[\s_]*(?:\(?\b(EU|EC|EEC|Euratom|CFSP)\b\)?)?[\s_]*"
+    r"(?:No\.?[\s_]*)?(\d{1,4}/\d{1,4}(?:/[A-Za-z]+)?)", re.I)
+LEGAL_ACT_COMPACT = re.compile(r"^\s*(Regulation|Directive|Decision)[\s_]*(EU|EC|EEC|Euratom)?[\s_]*\d{4,}\s*$", re.I)
+COMPANY_NAME = re.compile(
+    r"(?<![A-Za-z])(GmbH|Oy|Oyj|Ltd|Inc|S\.?A\.?|AG|SpA|S\.p\.A\.|BV|NV|AS|AB|A/S|plc|SE|SRL|SARL|"
+    r"Sp\.?[\s_]?z[\s_]?o\.?o\.?|Kft|s\.r\.o\.)\.?\s*$")
+# (verdict, reason): verdict is "class", "individual" or "drop"
+DROP, INDIVIDUAL, CLASS = "drop", "individual", "class"
+UPPER_OF_REASON = {"legal_act_reference": "LegalAct", "organisation_name": "Undertaking"}
+
+
+def legal_act_short(name: str) -> str | None:
+    """'DECISION (EU) 2016/1858 OF THE EUROPEAN PARLIAMENT ...' -> 'Decision (EU) 2016/1858'."""
+    if not isinstance(name, str):
+        return None
+    m = LEGAL_ACT_NAME.search(name)
+    if not m:
+        return None
+    kind, org, number = m.group(1).capitalize(), m.group(2), m.group(3)
+    org = {"euratom": "Euratom", "cfsp": "CFSP"}.get((org or "").lower(), (org or "").upper())
+    return f"{kind} ({org}) {number}" if org else f"{kind} {number}"
+
+
+def class_disposition(name: Any, description: str = "") -> tuple[str, str | None]:  # noqa: PLR0911
+    """Decide what a class name from a chunk ontology becomes in the merge.
+
+    Returns (verdict, reason). `drop` always has a reason, so no concept is lost
+    without one; `individual` names (acts, companies, case numbers) are kept as
+    individuals rather than rejected like a class would be."""
+    if not isinstance(name, str) or not name.strip():
+        return DROP, "empty_name"
+    key = _plain_key(name)
+    if key in CORE_TYPE_KEYS:
+        return DROP, "core_type_name"
+    if key in GENERIC_REFS:
+        return DROP, "placeholder_name"
+    if load_vocabulary().metamodel_leakage(name):          # AuditDuty, ...PermissionTarget
+        return DROP, "metamodel_leakage"
+    if DATE_NAME.search(name):
+        return DROP, "date_value"
+    if AMOUNT_NAME.search(name):
+        return DROP, "amount_value"
+    if PROVISION_REF_NAME.search(name):
+        return DROP, "provision_reference"
+    if LEGAL_ACT_NAME.search(name) or LEGAL_ACT_COMPACT.search(name) or INSTANCE_NAME_PATTERNS[-1].search(name):
+        return INDIVIDUAL, "legal_act_reference"
+    if COMPANY_NAME.search(name.strip()) or (description and INSTANCE_DESC_PATTERN.search(description)):
+        return INDIVIDUAL, "organisation_name"
+    if any(p.search(name) for p in INSTANCE_NAME_PATTERNS):
+        return INDIVIDUAL, "instance_name"
+    return CLASS, None
+
 # leakage from the generation prompt (import/export duty, cereal, 1985 ...)
 LEAKY_ACTION_PATTERNS = [re.compile(p, re.I) for p in (r"import_duty", r"export_duty", r"levy")]
 LEAKY_ACTION_EXACT = {"no_action", "none", "n_a", "null", "unknown"}
@@ -166,14 +228,20 @@ for _display, _variants in _gazetteer_alias_groups().items():
 def group_key(entity_type: str, name: str) -> str:
     if entity_type == "action":
         return "_".join(norm_tokens(name))
-    
+
+    name = legal_act_short(name) or name      # every spelling of an act's title -> one key
     toks = norm_tokens(name)
     
     if len(toks) > 1 and toks[-1] in GENERIC_SUFFIX_TOKENS:
         toks = toks[:-1]
     k = "".join(toks)
-    
+
     return ALIAS_KEY.get(k, k)
+
+
+def merge_name(name: str) -> str:
+    """Surface name a mention enters the merge with (short form for acts)."""
+    return (legal_act_short(name) or name).strip()
 
 
 def normalize_action(name: str) -> str:
@@ -221,30 +289,37 @@ def is_leaky_action(action: str) -> bool:
 # Structured ODRL constraints ({left_operand, operator, right_operand}) are kept
 # as they are: their dates and amounts are deliberate, typed values.
 # Legacy {"name", "value"} constraints go through the original filters.
-def clean_constraint(c: dict) -> dict | None:
+def constraint_drop_reason(c: dict) -> str | None:  # noqa: PLR0911
+    """Why `clean_constraint` discards `c`, or None when it is kept."""
     if c.get("left_operand"):
         right = c.get("right_operand")
         if right is None or is_placeholder(right) or is_placeholder(c["left_operand"]):
-            return None
+            return "constraint_placeholder"
+        return None
+    name, value = c.get("name"), c.get("value")
+    if not name or value is None or is_placeholder(value) or is_placeholder(name):
+        return "constraint_placeholder"
+    if str(name).strip().lower().endswith("constraint"):
+        return "constraint_metamodel_name"
+    if DROP_INSTANCE_CONSTRAINT_VALUES and any(p.search(str(value)) for p in INSTANCE_VALUE_PATTERNS):
+        return "constraint_instance_value"
+    text = f"{name} {value}".lower()
+    if any(t in text for t in LEAKY_CONSTRAINT_TEXT) or str(value).strip() in LEAKY_CONSTRAINT_VALUES:
+        return "constraint_prompt_leakage"
+    return None
+
+
+def clean_constraint(c: dict) -> dict | None:
+    if constraint_drop_reason(c):
+        return None
+    if c.get("left_operand"):
         out = {"left_operand": str(c["left_operand"]), "operator": str(c.get("operator") or "eq"),
-               "right_operand": str(right)}
+               "right_operand": str(c.get("right_operand"))}
         for k in ("unit", "source_name"):
             if c.get(k):
                 out[k] = str(c[k])
         return out
-    name, value = c.get("name"), c.get("value")
-    
-    if not name or value is None or is_placeholder(value) or is_placeholder(name):
-        return None
-    if str(name).strip().lower().endswith("constraint"):
-        return None
-    if DROP_INSTANCE_CONSTRAINT_VALUES and any(p.search(str(value)) for p in INSTANCE_VALUE_PATTERNS):
-        return None
-    text = f"{name} {value}".lower()
-    if any(t in text for t in LEAKY_CONSTRAINT_TEXT) or str(value).strip() in LEAKY_CONSTRAINT_VALUES:
-        return None
-    
-    return {"name": str(name), "value": str(value)}
+    return {"name": str(c.get("name")), "value": str(c.get("value"))}
 
 # separators for compound names: comma, semicolon, ampersand, or the word "and" (optionally "and the")
 _SEP = re.compile(r"\s*[,;&]\s*|(?:^|[\s_])and(?:[\s_]the)?(?:[\s_]|$)", re.I)
@@ -278,14 +353,19 @@ def _weight(obj: dict) -> int:
         return 1
 
 
-def extract_entities(ontologies: pd.DataFrame) -> pd.DataFrame:
+def extract_entities(ontologies: pd.DataFrame, skipped: list | None = None) -> pd.DataFrame:  # noqa: PLR0912
     """One row per mention of a class name or an action name (parties/assets are NOT mentions:
-    they are resolved against the class namespace afterwards)"""
+    they are resolved against the class namespace afterwards).
+
+    Class names that are not extracted are appended to `skipped` with their reason
+    (the same reasons the assembly records in its concept mapping)."""
     rows = []
     for _, row in ontologies.iterrows():
         try:
             onto = json.loads(row["ontology"])
         except (TypeError, json.JSONDecodeError):
+            if skipped is not None:
+                skipped.append({"source_id": str(row.get("chunk_id")), "name": None, "reason": "invalid_json"})
             continue
         if not isinstance(onto, dict):
             continue
@@ -294,10 +374,16 @@ def extract_entities(ontologies: pd.DataFrame) -> pd.DataFrame:
 
         for cls in _dicts(onto.get("classes")):
             name = cls.get("name")
-            if is_rejected_class(name, cls.get("description") or "") or is_composite_class(name):
+            verdict, reason = class_disposition(name, cls.get("description") or "")
+            if verdict == CLASS and is_composite_class(name):
+                verdict, reason = DROP, "composite_of_known_entities"
+            if verdict == DROP:
+                if skipped is not None:
+                    skipped.append({"source_id": source_id, "name": name, "reason": reason})
                 continue
-            rows.append({"entity_type": "class", "name": name.strip(), "declared_type": cls.get("type"),
-                         "weight": _weight(cls), "source_id": source_id, "CELEX": celex})
+            rows.append({"entity_type": "class", "name": merge_name(name), "declared_type": cls.get("type"),
+                         "weight": _weight(cls), "source_id": source_id, "CELEX": celex,
+                         "instance": verdict == INDIVIDUAL})
 
         rm = onto.get("rights_model")
         if isinstance(rm, dict):
@@ -311,7 +397,8 @@ def extract_entities(ontologies: pd.DataFrame) -> pd.DataFrame:
                     if not action or is_leaky_action(action):
                         continue
                     rows.append({"entity_type": "action", "name": action, "declared_type": "Action",
-                                 "weight": _weight(rule), "source_id": source_id, "CELEX": celex})
+                                 "weight": _weight(rule), "source_id": source_id, "CELEX": celex,
+                                 "instance": False})
     
     return pd.DataFrame(rows)
 
@@ -362,10 +449,13 @@ def _mergeable(a: list[str], b: list[str], sim: float) -> bool:
 
 # keys: unique exact-merge keys of the classes; reps: key -> most frequent surface name
 # Returns a union-find over the indices of `keys`
-def _cluster_class_keys(keys: list[str], reps: dict[str, str], model: str, threshold: float,
-                        backend: dict | None = None) -> _UnionFind:
+def _cluster_class_keys(keys: list[str], reps: dict[str, str], model: str, threshold: float,  # noqa: PLR0913
+                        backend: dict | None = None, exact_only: set[str] | None = None) -> _UnionFind:
+    """`exact_only`: keys of named individuals (acts, companies): they merge by exact key
+    only, since 'Decision 2016/2371' and 'Decision 2016/2099' embed almost identically."""
     uf = _UnionFind(len(keys))
-    
+    exact_only = exact_only or set()
+
     if not CLASS_EMBEDDINGS or len(keys) < 2:
         return uf
     try:
@@ -384,7 +474,8 @@ def _cluster_class_keys(keys: list[str], reps: dict[str, str], model: str, thres
         sims = unit[start:start + block] @ unit.T
         ii, jj = np.where(sims >= threshold)
         for i, j in zip(ii + start, jj):
-            if j > i and _mergeable(toks[i], toks[j], float(sims[i - start, j])):
+            if j > i and keys[i] not in exact_only and keys[j] not in exact_only \
+                    and _mergeable(toks[i], toks[j], float(sims[i - start, j])):
                 uf.union(int(i), int(j))
     
     return uf
@@ -409,7 +500,10 @@ def cluster_entities(entities: pd.DataFrame, embedding_model: str, similarity_th
         
         if etype == "class":
             reps = group.groupby("key")["name"].agg(lambda s: Counter(s).most_common(1)[0][0]).to_dict()
-            uf = _cluster_class_keys(keys, reps, embedding_model, similarity_threshold, embedding_backend)
+            exact_only = set(group.loc[group["instance"].fillna(False).astype(bool), "key"]) \
+                if "instance" in group else set()
+            uf = _cluster_class_keys(keys, reps, embedding_model, similarity_threshold, embedding_backend,
+                                     exact_only)
             root_of = {k: uf.find(i) for i, k in enumerate(keys)}
         else:                                           # actions: exact normalised key only
             root_of = {k: i for i, k in enumerate(keys)}
@@ -470,7 +564,7 @@ def build_resolver(canonical_map: dict[str, dict[str, str]]) -> Callable[[Any], 
     index = {group_key("class", v): c for v, c in canonical_map.get("class", {}).items()}
 
     def resolve(name: Any) -> str | None:
-        if not isinstance(name, str) or not name.strip() or is_rejected_class(name):
+        if not isinstance(name, str) or not name.strip() or class_disposition(name)[0] == DROP:
             return None
         k = group_key("class", name)
         

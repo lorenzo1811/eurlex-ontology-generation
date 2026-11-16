@@ -70,8 +70,21 @@ def test_llm_correction_is_accepted_only_if_found_in_the_text():
     llm = lambda system, user, schema: next(answers)  # noqa: E731
     repairer = Repairer(llm=llm)
     assert _repair(_rule("grant_loan", "grant"), repairer) is None          # evidence not in the text
+    assert repairer.last_llm == "llm_correct_not_verified"
     rule, method = _repair(_rule("grant_loan", "grant"), repairer)
-    assert method == "llm" and rule["action_label"] == "provide_eur"
+    assert method == "llm" and rule["action_label"] == "provide_eur" and repairer.last_llm == "llm_accepted"
+
+
+def test_removal_records_the_llm_outcome():
+    def broken(system, user, schema):
+        raise ConnectionError("no ollama")
+    onto = {"classes": [], "rights_model": {"permissions": [], "prohibitions": [],
+                                            "duties": [_rule("levy_customs_duty", "other")]}}
+    _, notes = cleanup_ontology(onto, TEXT, repairer=Repairer(llm=broken))
+    dropped = next(e for e in notes if e["code"] == "rule_ungrounded_dropped")
+    assert dropped["detail"].endswith("; llm_error:ConnectionError)")
+    _, notes = cleanup_ontology(onto, TEXT, repairer=Repairer())
+    assert next(e for e in notes if e["code"] == "rule_ungrounded_dropped")["detail"].endswith("; llm_off)")
 
 
 def test_constraint_values_are_repaired_from_the_rule_sentence():

@@ -194,7 +194,8 @@ def drop_ungrounded_actions(onto: dict, text: str, notes: list, repairer=None) -
                     kept.append(new)
                     continue
             if why:
-                notes.append(change("rule_ungrounded_dropped", f"{k}:{_rule_label(r)} ({why})",
+                llm = f"; {repairer.last_llm}" if repairer is not None and repairer.last_llm else ""
+                notes.append(change("rule_ungrounded_dropped", f"{k}:{_rule_label(r)} ({why}{llm})",
                                     target=rule_target(k, r), before=r))
                 continue
             kept.append(r)
