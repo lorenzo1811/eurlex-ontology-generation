@@ -14,13 +14,15 @@ Metric groups
   constraints   share structured as left_operand/operator/right_operand
   relations     share in the controlled relation set
   consistency   rule-slot typing, undefined references, isolated entities
-  linking       share of entities with an external identifier
+  linking       share of entities with an external identifier (per method: link_stats)
+  link gold     precision of the concept links judged by annotators, optional
   review        approval rate per round (from the review CSVs), optional
   gold          accuracy against an expert-annotated gold set, optional
 """
 from __future__ import annotations
 
 import json
+import random
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -28,6 +30,7 @@ from typing import Any
 import pandas as pd
 import yaml
 
+from .concept_linking import link_stats
 from .entity_linking import entity_key, load_gazetteer
 from .vocabulary import load_vocabulary
 
@@ -152,7 +155,9 @@ def compute_metrics(onto: dict) -> dict:
         "isolated_entities": len(names - used),
     }
     m["linking"] = {
-        "pct_entities_with_identifier": _pct(sum(1 for e in ents if e.get("iri") or e.get("wikidata")), len(ents)),
+        "pct_entities_with_identifier": _pct(sum(1 for e in ents if e.get("iri") or e.get("wikidata")
+                                                 or e.get("eurovoc")), len(ents)),
+        **({"by_method": link_stats(onto)} if "individuals" in onto else {}),
     }
     return m
 
@@ -354,3 +359,81 @@ def headline_table(results: dict[str, dict]) -> str:
             row += ("-" if v is None else str(v)).rjust(24)
         lines.append(row)
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- concept links
+LINK_JUDGEMENTS = ("correct", "close", "wrong")
+WIKIDATA_PAGE = "https://www.wikidata.org/wiki/"
+
+
+def _link_rows(e: dict) -> list[dict]:
+    """One row per link the linker made (gazetteer identifiers are checked elsewhere)."""
+    rows, methods = [], e.get("link_method") or {}
+    if e.get("wikidata") and methods.get("wikidata") not in (None, "gazetteer", "existing"):
+        rows.append({"target": "wikidata", "link_iri": WIKIDATA_PAGE + e["wikidata"],
+                     "relation_claimed": e.get("wikidata_relation", "exact"), "method": methods["wikidata"]})
+    ev = e.get("eurovoc") or {}
+    if ev.get("id") and methods.get("eurovoc") not in (None, "gazetteer"):
+        rows.append({"target": ev.get("source", "eurovoc"), "link_iri": ev["id"], "link_label": ev.get("label", ""),
+                     "relation_claimed": ev.get("relation", "exact"), "method": methods["eurovoc"]})
+    return rows
+
+
+def link_sheet_rows(onto: dict, n: int, seed: int, unlinked_share: float = 0.25,
+                    annotator: str = "A") -> list[dict]:
+    """Rows of a link annotation sheet: a sample of the links made by the linker plus a
+    share of unlinked concepts (to estimate missed links). The method that produced
+    a link is not shown; the evaluation reads it back from the ontology."""
+    rng = random.Random(seed)
+    linked, unlinked = [], []
+    for kind, section in (("class", "classes"), ("individual", "individuals")):
+        for e in sorted(_dicts(onto.get(section)), key=lambda e: e["name"]):
+            rows = _link_rows(e)
+            if rows:
+                linked += [(e, kind, r) for r in rows]
+            elif not (e.get("wikidata") or e.get("iri")):
+                unlinked.append((e, kind, {"target": "none", "link_iri": "", "relation_claimed": ""}))
+    n_unlinked = min(len(unlinked), round(n * unlinked_share))
+    sample = rng.sample(linked, min(len(linked), n - n_unlinked)) + rng.sample(unlinked, n_unlinked)
+    rng.shuffle(sample)
+    out = []
+    for i, (e, kind, r) in enumerate(sample, 1):
+        quote = next((p.get("quote") for p in e.get("provenance") or []
+                      if isinstance(p, dict) and p.get("quote")), "")
+        out.append({"item": i, "name": e["name"], "kind": kind, "description": (e.get("description") or "")[:300],
+                    "context": (quote or "")[:300], "target": r["target"], "link_label": r.get("link_label", ""),
+                    "link_iri": r["link_iri"], "relation_claimed": r["relation_claimed"],
+                    "judgement": "", "better_iri": "", "notes": "", "annotator": annotator})
+    return out
+
+
+def link_gold_metrics(onto: dict, sheet_path: str) -> dict:
+    """Precision of the links judged in a link sheet (judgement: correct / close / wrong).
+
+    precision_strict   links judged `correct` (same concept / entity)
+    precision_lenient  links judged `correct` or `close` (a usable skos:closeMatch)
+    missed_links       sampled unlinked concepts for which the annotator gave a better_iri
+    """
+    df = pd.read_csv(sheet_path, encoding="utf-8", dtype=str).fillna("")
+    method_of = {}
+    for e in _entities(onto):
+        for r in _link_rows(e):
+            method_of[(e["name"], r["link_iri"])] = r["method"]
+    judgement = df["judgement"].str.strip().str.lower()
+    judged = df[judgement.isin(LINK_JUDGEMENTS) & (df["target"] != "none")].copy()
+    unlinked = df[df["target"] == "none"]
+
+    def prec(rows: pd.DataFrame) -> dict:
+        j = rows["judgement"].str.strip().str.lower()
+        return {"n": len(rows), "precision_strict": _pct(int((j == "correct").sum()), len(rows)),
+                "precision_lenient": _pct(int(j.isin(["correct", "close"]).sum()), len(rows))}
+
+    judged["method"] = [method_of.get((n, i), "unknown") for n, i in zip(judged["name"], judged["link_iri"])]
+    return {
+        "judged_links": prec(judged),
+        "by_method": {m: prec(g) for m, g in judged.groupby("method")},
+        "by_target": {t: prec(g) for t, g in judged.groupby("target")},
+        "unlinked_sampled": len(unlinked),
+        "missed_links": int((unlinked["better_iri"].str.strip() != "").sum()),
+        "coverage": link_stats(onto),
+    }

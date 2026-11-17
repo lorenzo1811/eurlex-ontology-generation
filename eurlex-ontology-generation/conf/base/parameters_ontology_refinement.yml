@@ -17,6 +17,10 @@ ontology_refinement:
   # proposals here as `pending`; only lines a person marked `accepted` are applied.
   curation_path: data/05_model_input/curation/decisions.jsonl
 
+  # Concept links (Wikidata / EuroVoc / EU corporate bodies) written by
+  # scripts/link_concepts.py; applied when the file exists. Gazetteer IDs win.
+  links_path: data/05_model_input/concept_links.json
+
   # Optional: confirm low-confidence class/individual decisions on Wikidata
   # (P31 instance of vs P279 subclass of). Needs network access; results are
   # cached so each label is looked up once. Off by default.

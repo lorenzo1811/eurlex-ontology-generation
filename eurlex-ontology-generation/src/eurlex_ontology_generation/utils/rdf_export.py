@@ -175,7 +175,8 @@ def build_tbox(g: Graph, ns: dict, vocab: Vocabulary) -> None:
     for p in ("entityKind", "coreType", "supportChunks", "supportDocuments", "supportApprovedChunks",
               "typeSource", "kindConfidence", "actionObject", "actionLabel", "provision",
               "mergedFrom", "upperClass", "coreClass", "status", "celex", "actType", "year",
-              "chunkId", "section", "article", "paragraph", "recital", "extractionMatch"):
+              "chunkId", "section", "article", "paragraph", "recital", "extractionMatch",
+              "linkMethod", "linkConfidence"):
         g.add((eo[p], RDF.type, OWL.AnnotationProperty))
     g.add((eo.TextEvidence, RDF.type, OWL.Class))
     g.add((eo.TextEvidence, RDFS.label, Literal("Text evidence", lang="en")))
@@ -239,7 +240,7 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
     build_tbox(g, ns, vocab)
     stats = {"classes": 0, "accepted_classes": 0, "candidate_classes": 0, "individuals": 0, "rules": 0,
              "relationships": 0, "constraints": 0, "policies": 0, "evidence_links": 0,
-             "elements_without_evidence": 0, "skipped": []}
+             "elements_without_evidence": 0, "eurovoc_links": 0, "skipped": []}
 
     def evidence(node, obj: dict) -> None:
         n = add_evidence(g, ns, node, obj.get("provenance"))
@@ -277,6 +278,18 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
             g.add((node, eo.mergedFrom, Literal(variant)))
         evidence(node, e)
 
+    def add_links(node, e: dict) -> None:
+        # EuroVoc / EU authority concept from scripts/link_concepts.py, with how it was found
+        ev = e.get("eurovoc") or {}
+        if ev.get("id"):
+            prop = SKOS.closeMatch if ev.get("relation") == "close" else SKOS.exactMatch
+            g.add((node, prop, URIRef(ev["id"])))
+            stats["eurovoc_links"] += 1
+        for target, method in (e.get("link_method") or {}).items():
+            g.add((node, eo.linkMethod, Literal(f"{target}:{method}")))
+        if e.get("link_confidence"):
+            g.add((node, eo.linkConfidence, Literal(str(e["link_confidence"]))))
+
     for c in refined.get("classes", []):
         node = entity_iri(c["name"])
         g.add((node, RDF.type, OWL.Class))
@@ -286,9 +299,11 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
         # a class is not the same thing as a Wikidata item / authority concept:
         # skos:exactMatch (mapping), not owl:sameAs (identity, used for individuals)
         if c.get("wikidata"):
-            g.add((node, SKOS.exactMatch, WD[c["wikidata"]]))
+            close = c.get("wikidata_relation") == "close"
+            g.add((node, SKOS.closeMatch if close else SKOS.exactMatch, WD[c["wikidata"]]))
         if c.get("iri"):
             g.add((node, SKOS.exactMatch, URIRef(c["iri"])))
+        add_links(node, c)
         status = c.get("status") or "accepted"
         g.add((node, eo.status, Literal(status)))
         stats["classes"] += 1
@@ -301,9 +316,12 @@ def export_rdf(refined: dict, base_iri: str = DEFAULT_BASE_IRI,
             g.add((node, RDF.type, eo[i["instance_of"]]))
         describe(node, i, "individual")
         if i.get("wikidata"):
-            g.add((node, OWL.sameAs, WD[i["wikidata"]]))
+            # identity only for an exact link; a close one is a mapping
+            close = i.get("wikidata_relation") == "close"
+            g.add((node, SKOS.closeMatch if close else OWL.sameAs, WD[i["wikidata"]]))
         if i.get("iri"):
             g.add((node, SKOS.exactMatch, URIRef(i["iri"])))
+        add_links(node, i)
         if i.get("member_state") is not None:
             g.add((node, eo.memberState, Literal(bool(i["member_state"]))))
         stats["individuals"] += 1

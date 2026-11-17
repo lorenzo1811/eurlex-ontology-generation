@@ -1,3 +1,8 @@
+# Direct dependencies of the project, for pip users. The reference is pyproject.toml +
+# uv.lock (pinned versions): prefer `uv sync`. With pip:
+#   pip install -r requirements.txt && pip install -e .
+# Optional extras (pyproject.toml): dev, reasoner, agent, linking
+#   pip install -e ".[dev]"      pip install -e ".[linking]"   (linking: Python <= 3.12)
 ipython>=8.10
 jupyterlab>=3.0
 notebook
@@ -5,3 +10,7 @@ kedro~=1.4.0
 pandas>=2.3.3
 kedro-datasets>=9.5.0
 ollama>=0.6.2
+networkx>=3.4.2
+filelock>=4.0.9
+rdflib>=7.0
+pyshacl>=0.26

@@ -1,0 +1,63 @@
+# Concept linking (scripts/link_concepts.py), run after the merge on the refined
+# ontology. Not a Kedro pipeline: the script reads this file directly, so do not
+# use ${globals:...} interpolation here. Overrides: conf/local/parameters_concept_linking.yml.
+#
+# On Colab (GPU):
+#   !uv run --extra linking python scripts/link_concepts.py index   # once (installs torch + relik)
+#   !uv run --extra linking python scripts/link_concepts.py link --apply
+concept_linking:
+  refined_path: data/07_model_output/eurlex_odrl_ontology_refined.json
+  links_path: data/05_model_input/concept_links.json        # read by ontology_refinement.links_path
+  index_directory: data/02_intermediate/linking/eurovoc_index
+  # chunk texts (chunk_id + text/chunk_text); ReLiK runs on the chunks a concept comes from
+  chunk_text_files:
+    - data/04_feature/ontology_revisions/part_*.csv
+  # EUROVOC descriptors of each act (prior for the EuroVoc candidates); optional
+  corpus_path: data/02_intermediate/eurlex_corpus.csv
+  user_agent: "EurLexOntologyGeneration/0.1 (research project)"
+  wikipedia_cache: data/02_intermediate/linking/wikipedia_qids.json
+
+  # Wikidata: candidates searched on Wikidata for the concepts of each chunk, then
+  # ReLiK's reader (CC BY-NC-SA 4.0, research use) links the chunk's spans to them.
+  # ReLiK's full model is not loaded: its Wikipedia index is 12 GB in memory.
+  # Without ReLiK (--no-relik) an exact Wikidata label match is used.
+  wikidata_search_cache: data/02_intermediate/linking/wikidata_search.json
+  relik:
+    enabled: true
+    reader_model: sapienzanlp/relik-reader-deberta-v3-large-aida   # -base-aida is lighter
+    device: null          # null = cuda if available
+    precision: null       # e.g. 16 on a GPU
+    window_size: 32
+    window_stride: 16
+    max_candidates: 60    # Wikipedia titles per chunk given to the reader
+    spans_cache: data/02_intermediate/linking/relik_spans.json
+
+  # EuroVoc / corporate bodies index. kind relik|hf: a Hugging Face encoder
+  # (ReLiK's retriever encoder, zero-shot); kind embed: an embedding backend
+  # (e.g. {provider: ollama}, model nomic-embed-text). The index must be rebuilt
+  # when the encoder changes.
+  encoder:
+    kind: relik
+    model: sapienzanlp/relik-retriever-e5-base-v2-aida-blink-encoder
+    pooling: pooler           # kind relik: GoldenRetrieverModel output; kind hf: mean or cls
+    prefix: ""
+    batch_size: 64
+  vocabularies:
+    eurovoc:
+      scheme: http://eurovoc.europa.eu/100141
+      skos_file: null     # a downloaded SKOS file instead of the SPARQL endpoint
+    corporate_body:
+      scheme: http://publications.europa.eu/resource/authority/corporate-body
+      skos_file: null
+  k: 8                    # candidates shown to the LLM
+  prior_bonus: 0.05       # score bonus for candidates among the act's EUROVOC descriptors
+
+  # LLM that chooses exact / close / none among the candidates
+  llm:
+    enabled: true
+    model: gemma3:4b
+    backend:
+      provider: ollama
+    temperature: 0.0
+    num_ctx: 4096
+    num_predict: 200

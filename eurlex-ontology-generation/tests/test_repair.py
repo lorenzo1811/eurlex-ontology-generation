@@ -75,6 +75,15 @@ def test_llm_correction_is_accepted_only_if_found_in_the_text():
     assert method == "llm" and rule["action_label"] == "provide_eur" and repairer.last_llm == "llm_accepted"
 
 
+def test_irregular_participles_ground_the_verb():
+    text = "4. All costs incurred by the Union which relate to the borrowing and lending operations " \
+           "under this Decision shall be borne by Jordan."
+    assert action_ungrounded_reason(_rule("bear_costs", "other"), text) is None
+    assert action_ungrounded_reason(_rule("recover_costs", "other"), text) == "verb 'recover' not in text"
+    # a word boundary is required: 'laid' must not match inside another word
+    assert action_ungrounded_reason(_rule("lay_down_rules"), "the rules are delaid") is not None
+
+
 def test_removal_records_the_llm_outcome():
     def broken(system, user, schema):
         raise ConnectionError("no ollama")

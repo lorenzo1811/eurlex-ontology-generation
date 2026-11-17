@@ -39,6 +39,17 @@ reasoner = [
 agent = [
     "mcp>=1.2",
 ]
+# Concept linking (scripts/link_concepts.py): ReLiK entity linking + retriever encoder.
+# Heavy (torch); meant for Colab with a GPU. ReLiK is CC BY-NC-SA 4.0 (research use).
+linking = [
+    "relik>=1.0",
+    # lightning (used by relik) imports pkg_resources, removed from setuptools 81
+    "setuptools>=70,<81",
+    # torch 2.3 and spaCy 3.7 (pinned by relik) are built against numpy 1.x
+    "numpy<2; python_version < '3.13'",
+    # spaCy tokenizer used by ReLiK (otherwise spaCy tries to pip-install it at run time)
+    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl",
+]
 dev = [
     "pytest-cov>=3,<7",
     "pytest-mock>=1.7.1, <2.0",

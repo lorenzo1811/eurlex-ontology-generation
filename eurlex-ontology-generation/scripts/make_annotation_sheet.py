@@ -50,9 +50,14 @@ def main() -> None:
     p.add_argument("--seed", type=int, default=20261007, help="Same seed = same sample for every annotator.")
     p.add_argument("--annotator", default="A")
     p.add_argument("--out-dir", default="data/08_reporting/annotation")
+    p.add_argument("--links", action="store_true",
+                   help="Sheet of concept links to judge (correct / close / wrong) instead of typing labels.")
     args = p.parse_args()
 
     onto = json.loads(Path(args.ontology).read_text(encoding="utf-8"))
+    if args.links:
+        write_link_sheet(onto, args)
+        return
     entities = onto.get("classes", []) + onto.get("individuals", [])
     contexts: dict[str, list[str]] = {}
     for ex in onto.get("example_instances", []):
@@ -86,6 +91,29 @@ def main() -> None:
         ANNOTATION_GUIDE.format(upper=", ".join(vocab.upper_names)), encoding="utf-8")
     print(f"Wrote {sheet} ({len(rows)} entities: {len(rows) - n_control} decided by typer/LLM, "
           f"{n_control} gazetteer controls) and {out / 'ANNOTATION_GUIDE.txt'}")
+
+
+LINK_GUIDE = """\
+For each row, open link_iri and judge whether it denotes the concept `name` (use
+description and context, which come from the act):
+judgement   correct (the same concept / the same named entity)
+            | close (broader, narrower or closely related: a usable skos:closeMatch)
+            | wrong
+For rows with target `none` (no link was found): put the right Wikidata or EuroVoc
+IRI in better_iri if one exists, otherwise leave it empty.
+"""
+
+
+def write_link_sheet(onto: dict, args) -> None:
+    from eurlex_ontology_generation.utils.evaluation import link_sheet_rows  # noqa: PLC0415
+
+    rows = link_sheet_rows(onto, args.n, args.seed, annotator=args.annotator)
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    sheet = out / f"link_sheet_{args.annotator}.csv"
+    pd.DataFrame(rows).to_csv(sheet, index=False, encoding="utf-8")
+    (out / "LINK_GUIDE.txt").write_text(LINK_GUIDE, encoding="utf-8")
+    print(f"Wrote {sheet} ({len(rows)} rows) and {out / 'LINK_GUIDE.txt'}")  # noqa: T201
 
 
 if __name__ == "__main__":

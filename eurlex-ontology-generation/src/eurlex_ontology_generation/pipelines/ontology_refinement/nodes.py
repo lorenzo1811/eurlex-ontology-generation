@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ...utils.changelog import change, class_target, stamp
+from ...utils.concept_linking import apply_links, load_links
 from ...utils.entity_linking import WikidataLinker, load_gazetteer
 from ...utils.ontology_normalize import CORE_ENTITIES, split_composite, type_entity
 from ...utils.ontology_schema import RULE_KINDS
@@ -71,6 +72,11 @@ def _item_id(kind: str, subject: str) -> str:
     return f"{kind}:{hashlib.sha1(subject.encode()).hexdigest()[:10]}"
 
 
+def load_concept_links(path: str | None) -> dict:
+    """Concept links (Wikidata / EuroVoc) written by scripts/link_concepts.py, {} if absent."""
+    return load_links(path)
+
+
 def load_curation(path: str | None) -> list[dict]:
     """Accepted curation decisions (JSONL written by the MCP server / scripts/curation.py).
     Only `status: accepted` lines are applied; pending and rejected ones are ignored."""
@@ -88,13 +94,17 @@ def load_curation(path: str | None) -> list[dict]:
 def refine_ontology(merged: dict, wikidata: dict | None = None,
                     vocabulary_path: str | None = None,
                     curation: list[dict] | None = None,
-                    min_documents_for_class: int = 3) -> tuple[dict, dict]:
+                    min_documents_for_class: int = 3,
+                    links: dict | None = None) -> tuple[dict, dict]:
     """See module docstring. `curation` holds accepted decisions (set_typing,
     merge_entities, remove_rule, promote_class, demote_class); they are applied
     last, so a person's decision always wins over heuristics.
     Classes supported by fewer than `min_documents_for_class` acts get
-    status `candidate` (kept, flagged) unless promoted by a decision."""
+    status `candidate` (kept, flagged) unless promoted by a decision.
+    `links` (scripts/link_concepts.py, via load_concept_links) adds Wikidata /
+    EuroVoc links; gazetteer identifiers are never overwritten."""
     curation = curation or []
+    links = links or {}
     vocab = load_vocabulary(vocabulary_path)
     gazetteer = load_gazetteer(None, vocabulary_path)
     wikidata = wikidata or {}
@@ -372,6 +382,10 @@ def refine_ontology(merged: dict, wikidata: dict | None = None,
             record["merged_from"] = sorted(set(e["variants"]))
         if e.get("provenance"):
             record["provenance"] = e["provenance"]
+        linked = apply_links(record, links)
+        if linked:
+            changes["concept_linked"] += 1
+            events.extend(linked)
         if t["kind"] == "individual":
             record["instance_of"] = record.pop("is_a")
             individuals.append(record)

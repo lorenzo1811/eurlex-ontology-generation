@@ -25,6 +25,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from eurlex_ontology_generation.utils.concept_linking import link_stats  # noqa: E402
 from eurlex_ontology_generation.utils.ontology_merge_common.entity_resolution import (  # noqa: E402
     group_key,
 )
@@ -318,6 +319,7 @@ def main() -> None:
             ontos = [o for o in (_load(v) for v in source["ontology"]) if isinstance(o, dict)]
             coverages = [json.loads(Path(f).read_text(encoding="utf-8")) for f in args.merge_coverage]
             report["merge_coverage"] = coverage_report(ontos, refined, coverages)
+        report["concept_links"] = link_stats(refined)
 
     text = json.dumps(report, indent=2, ensure_ascii=False)
     if args.out:

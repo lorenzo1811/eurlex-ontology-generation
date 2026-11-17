@@ -111,6 +111,32 @@ def empty_ontology(name: str = "NoRulesInFragment",
 
 
 # --------------------------------------------------------------- action grounding
+# Irregular past forms: the stem test misses them ('bear' vs 'shall be borne by Jordan').
+# Verbs frequent in EU acts, in the passive voice of rules ('shall be laid down', 'shall be paid').
+IRREGULAR_VERB_FORMS: dict[str, tuple[str, ...]] = {
+    "bear": ("bore", "borne"), "make": ("made",), "take": ("took", "taken"),
+    "give": ("gave", "given"), "pay": ("paid",), "lay": ("laid",), "set": ("set",),
+    "draw": ("drew", "drawn"), "hold": ("held",), "keep": ("kept",), "send": ("sent",),
+    "spend": ("spent",), "lend": ("lent",), "seek": ("sought",), "bring": ("brought",),
+    "buy": ("bought",), "choose": ("chose", "chosen"), "write": ("wrote", "written"),
+    "undertake": ("undertook", "undertaken"), "withdraw": ("withdrew", "withdrawn"),
+    "forbid": ("forbade", "forbidden"), "begin": ("began", "begun"), "run": ("ran",),
+    "meet": ("met",), "find": ("found",), "leave": ("left",), "lose": ("lost",),
+    "show": ("shown",), "know": ("known",), "grow": ("grew", "grown"), "build": ("built",),
+    "deal": ("dealt",), "mean": ("meant",), "put": ("put",), "cut": ("cut",),
+    "rise": ("rose", "risen"), "arise": ("arose", "arisen"), "sell": ("sold",),
+    "tell": ("told",), "become": ("became",), "come": ("came",), "go": ("went", "gone"),
+    "see": ("saw", "seen"), "get": ("got", "gotten"), "be": ("been", "was", "were"),
+    "have": ("had",), "do": ("did", "done"), "foresee": ("foreseen",), "override": ("overridden",),
+    "oversee": ("oversaw", "overseen"), "uphold": ("upheld",), "withhold": ("withheld",),
+}
+
+
+def irregular_form_in(verb: str, haystack: str) -> bool:
+    """True if an irregular past form of `verb` occurs as a word in `haystack` (lowercase)."""
+    return any(re.search(rf"\b{f}\b", haystack) for f in IRREGULAR_VERB_FORMS.get(verb, ()))
+
+
 def action_ungrounded_reason(rule: dict, text: str) -> str | None:
     """Why the action of `rule` has no support in `text`, or None if it has.
 
@@ -124,7 +150,7 @@ def action_ungrounded_reason(rule: dict, text: str) -> str | None:
         return None
     haystack = text.lower() if text else ""
     verb = words[0]
-    if len(verb) >= 3 and _stem(verb) not in haystack:
+    if len(verb) >= 3 and _stem(verb) not in haystack and not irregular_form_in(verb, haystack):
         return f"verb '{verb}' not in text"
     for obj in words[1:]:
         if len(obj) > 3 and _stem(obj) not in haystack:

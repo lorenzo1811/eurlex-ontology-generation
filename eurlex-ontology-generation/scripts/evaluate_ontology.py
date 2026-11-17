@@ -27,6 +27,7 @@ from eurlex_ontology_generation.utils.evaluation import (  # noqa: E402
     compute_metrics,
     gold_metrics,
     headline_table,
+    link_gold_metrics,
     review_metrics,
     typer_ablation,
 )
@@ -43,6 +44,8 @@ def main() -> None:
                         help="Skip the held-out typer test (typer vs gazetteer facts, gazetteer off).")
     parser.add_argument("--reviews-dir", default=None, help="Directory with review part_*.csv files.")
     parser.add_argument("--out", default=None, help="Write all metrics to this JSON file.")
+    parser.add_argument("--link-gold", default=None,
+                        help="Completed link sheet (make_annotation_sheet.py --links) for link precision.")
     parser.add_argument("--shacl", action="store_true",
                         help="Also export refined ontologies to RDF and count SHACL results.")
     args = parser.parse_args()
@@ -53,6 +56,8 @@ def main() -> None:
         metrics = compute_metrics(onto)
         if args.gold:
             metrics["gold"] = gold_metrics(onto, args.gold)
+        if args.link_gold:
+            metrics["link_gold"] = link_gold_metrics(onto, args.link_gold)
         if args.shacl and "individuals" in onto:
             from eurlex_ontology_generation.utils.rdf_export import export_rdf
             from eurlex_ontology_generation.utils.rdf_validate import validate_graph
@@ -77,6 +82,18 @@ def main() -> None:
             print(f"    held-out (report this)   {fmt(g['held_out'])}")
             print(f"    gazetteer lookups        {fmt(g['gazetteer_lookups'])}")
             print(f"    seed smoke test (not evidence) {fmt(g['seed_smoke_test'])}")
+
+    if args.link_gold:
+        print("\nConcept links (judged by annotators; gazetteer identifiers excluded)")
+        for label, m in results.items():
+            lg = m["link_gold"]
+            j = lg["judged_links"]
+            print(f"  [{label}] coverage {lg['coverage']['linked_share']:.1%}, judged {j['n']}: "
+                  f"precision strict {j.get('precision_strict')}%, lenient {j.get('precision_lenient')}%; "
+                  f"missed links {lg['missed_links']}/{lg['unlinked_sampled']} unlinked sampled")
+            for method, pm in lg["by_method"].items():
+                print(f"    {method:<16} n={pm['n']:<4} strict {pm['precision_strict']}%  "
+                      f"lenient {pm['precision_lenient']}%")
 
     output = {"ontologies": results}
     if not args.no_ablation:

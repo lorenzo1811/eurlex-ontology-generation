@@ -180,6 +180,44 @@ reports repaired vs removed.
   `llm_accepted`); it is appended to the removal event detail and counted by
   `batch_report.py` (`repair_llm_step`), since errors were swallowed before.
 
+### 0g. Concept linking: Wikidata and EuroVoc
+`utils/concept_linking.py` + `scripts/link_concepts.py`, after the merge, on the
+refined ontology; the refinement applies the links file
+(`ontology_refinement.links_path`) and the export writes them.
+- Wikidata: candidate items are searched on Wikidata for the concepts of each chunk
+  (`WikidataSearch`: prefix then full-text search, enwiki titles, cached, retried on rate
+  limits); ReLiK's reader (Orlando et al., 2024, `sapienzanlp/relik-reader-deberta-v3-large-aida`;
+  CC BY-NC-SA 4.0, research use only) links the spans of the chunk to those titles. ReLiK's own
+  Wikipedia index is not loaded (12 GB in memory). A span equal to the concept name or a merged
+  variant is an exact link (`relik_exact`); spans sharing only the head noun go to the LLM
+  (`relik_llm`). Without ReLiK: exact Wikidata label (`wikidata_label`).
+- EuroVoc and EU corporate bodies (SKOS from the Publications Office SPARQL
+  endpoint, or downloaded files): a dense index (`VocabularyIndex`, jsonl + npy)
+  encoded zero-shot with ReLiK's retriever encoder (`GoldenRetrieverModel`, pooler output), or
+  an embedding backend.
+  Exact label/altLabel match → `label_exact`; otherwise the top-k candidates,
+  re-ranked with the act's own EUROVOC descriptors (`prior_bonus`), go to
+  gemma3:4b, which answers `exact` / `close` / `none` by candidate number
+  (`retriever_llm`); an answer that names no candidate, or whose label shares no content word
+  with the concept name (`shares_content_word`), is no link. All-caps labels (acronyms) match
+  only with the same case. Corporate
+  bodies are offered to `Party` concepts only.
+- The gazetteer wins: its QIDs / EU IRIs are never overwritten (`gazetteer`).
+- Refined fields: `wikidata` (+ `wikidata_relation`), `eurovoc` {id, label,
+  relation, source}, `link_method` per target, `link_confidence` (high: gazetteer
+  or exact match; medium: LLM exact; low: LLM close); events `concept_linked`.
+- Export: individuals `owl:sameAs` Wikidata only for an exact link, otherwise
+  `skos:closeMatch`; classes `skos:exactMatch` / `skos:closeMatch`; EuroVoc
+  `skos:exactMatch` / `skos:closeMatch`; `eo:linkMethod`, `eo:linkConfidence`.
+  SHACL Info: classes without any link (individuals already had one).
+- Evaluation: `make_annotation_sheet.py --links` samples the links made by the
+  linker (gazetteer links excluded: they are the gazetteer's content) plus 25%
+  unlinked concepts, without showing the method; annotators judge
+  correct / close / wrong and give `better_iri` for missed links.
+  `evaluate_ontology.py --link-gold` reports precision strict (correct) and
+  lenient (correct + close) per method and target, missed links, and coverage
+  (`link_stats`, also in `batch_report.py` as `concept_links`).
+
 ### 1. Inconsistent typing
 | Layer | Where | What it does |
 |---|---|---|

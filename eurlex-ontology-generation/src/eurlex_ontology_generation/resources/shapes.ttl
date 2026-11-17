@@ -110,6 +110,16 @@ eosh:IdentifierShape
         $this eo:entityKind "individual" .
         FILTER NOT EXISTS { $this owl:sameAs ?wd }
         FILTER NOT EXISTS { $this skos:exactMatch ?iri }
+      }""" ] ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Class has no external link (skos:exactMatch or skos:closeMatch to Wikidata / EuroVoc)." ;
+    sh:prefixes eosh: ;
+    sh:select """
+      SELECT $this WHERE {
+        $this eo:entityKind "class" .
+        FILTER NOT EXISTS { $this skos:exactMatch ?iri }
+        FILTER NOT EXISTS { $this skos:closeMatch ?close }
       }""" ] .
 
 eosh:WikidataShape
